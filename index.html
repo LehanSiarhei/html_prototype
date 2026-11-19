@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SkyArc — выбор даты и времени</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light dark;
+    --page-bg: #e6e7ea;
+    --panel-bg: rgba(34, 35, 38, 0.84);
+    --accent: #ff2c00;
+    --muted: #b9b9b9;
+    --on-accent: #ffffff;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --page-bg: #101113; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --page-bg: #101113; color-scheme: dark; }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0; height: 100%;
+    background: var(--page-bg);
+    font-family: "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: grid; place-items: center;
+    overflow: hidden;
+  }
+
+  /* Phone frame: 393 × 852 as in Figma; full-screen on phones */
+  .stage {
+    position: relative;
+    width: 393px; height: 852px;
+    border-radius: 54px;
+    overflow: hidden;
+    transform-origin: center;
+    background:
+      linear-gradient(180deg, #1f5fae 0%, #3f7fc6 38%, #8fb0cf 58%, #b9a98f 72%, #5d5143 86%, #2b2a27 100%);
+  }
+  @media (max-width: 500px) {
+    body { display: block; }
+    .stage {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      width: auto; height: auto;
+      border-radius: 0;
+      transform: none !important;
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+  }
+
+  /* Live sun path overlay, recomputed every frame */
+  .sky {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+  /* Drag on the sky: look around (no sensors) or fine-tune the compass (with sensors) */
+  .look { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+  .picker, .cam-btn, .status { z-index: 2; }
+  .status {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: calc(62px + env(safe-area-inset-top, 0px));
+    width: max-content; max-width: calc(100% - 40px);
+    margin: 0; padding: 10px 16px;
+    border-radius: 18px;
+    background: var(--panel-bg);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    color: #fff; font: 500 14px/1.3 "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    text-align: center; pointer-events: none;
+  }
+  .status[hidden] { display: none; }
+  @media (min-width: 501px) { .status { top: 62px; } }
+
+  /* Live camera as the background */
+  .cam, .tint { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cam { object-fit: cover; opacity: 0; transition: opacity .4s ease; background: transparent; }
+  .stage.has-cam .cam { opacity: 1; }
+  .tint { background: rgba(0, 0, 0, 0.3); pointer-events: none; }
+  .cam-btn {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: calc(62px + env(safe-area-inset-top, 0px));
+    max-width: calc(100% - 40px);
+    padding: 10px 18px;
+    border: 0; border-radius: 26px;
+    background: var(--panel-bg);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    color: #fff; font: 600 16px/1.2 "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    text-align: center; cursor: pointer;
+  }
+  .cam-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .cam-btn[disabled] { cursor: default; color: var(--muted); }
+  .stage.ar-on .cam-btn { display: none; }
+  @media (min-width: 501px) { .cam-btn { top: 62px; } }
+
+  /* Calendar block */
+  .picker {
+    position: absolute;
+    left: 20px; right: 20px;
+    bottom: 65px;
+    height: 176px;
+    border-radius: 26px;
+    background: var(--panel-bg);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  @media (max-width: 500px) {
+    .picker { bottom: calc(65px + env(safe-area-inset-bottom, 0px)); }
+  }
+
+  .row {
+    position: absolute; left: 0; right: 0;
+  }
+  .row--time  { top: 10px;  height: 60px; }
+  .row--day   { top: 72px;  height: 46px; }
+  .row--month { top: 120px; height: 46px; }
+
+  .strip {
+    position: absolute; inset: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+  }
+  .track {
+    position: relative; height: 100%;
+    will-change: transform;
+  }
+  /* Labels fade out right next to the red selection, keeping a clean gap like in the mockup */
+  .row { --gap: 8px; }
+  .row--time { --gap: 3px; }
+  .strip {
+    --mask: linear-gradient(to right,
+      #000 calc(50% - 23px - var(--gap) - 6px),
+      transparent calc(50% - 23px - var(--gap)),
+      transparent calc(50% + 23px + var(--gap)),
+      #000 calc(50% + 23px + var(--gap) + 6px));
+    -webkit-mask-image: var(--mask);
+    mask-image: var(--mask);
+  }
+  .strip::-webkit-scrollbar { display: none; }
+  .strip.is-dragging { cursor: grabbing; }
+  .strip:focus-visible { outline: none; }
+  .row:has(.strip:focus-visible) .pill { box-shadow: 0 0 0 2px #fff; }
+
+  .item {
+    position: absolute; top: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    scroll-snap-align: center;
+    color: var(--muted);
+    font-weight: 500;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .row--time  .item { width: 29px; height: 100%; }
+  .row--day   .item, .row--month .item { width: 44px; height: 100%; }
+
+  .t-num  { font-size: 18px; line-height: 18px; margin-bottom: -4px; }
+  .t-sub  { font-size: 12px; line-height: 18px; }
+  .t-dot  { width: 2.021px; height: 1.951px; display: block; }
+  .d-num  { font-size: 18px; line-height: normal; }
+  .m-name { font-size: 16px; font-weight: 600; line-height: normal; }
+
+  /* Red selection stays fixed; the strip scrolls underneath it */
+  .pill {
+    position: absolute; top: 0; left: 50%;
+    width: 46px; height: 100%;
+    margin-left: -23px;
+    border-radius: 66px;
+    background: var(--accent);
+    color: var(--on-accent);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    pointer-events: none;
+    font-weight: 500; text-align: center; white-space: nowrap;
+  }
+  .pill--time { gap: 2px; }
+  .p-num   { font-size: 28px; line-height: 18px; }
+  .p-sub   { font-size: 16px; line-height: 18px; }
+  .p-month { font-size: 24px; line-height: normal; letter-spacing: -0.96px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .strip { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <video class="cam" id="cam" playsinline muted autoplay aria-hidden="true"></video>
+    <div class="tint" aria-hidden="true"></div>
+    <button class="cam-btn" id="camBtn" type="button">Включить камеру и датчики</button>
+    <p class="status" id="status" role="status" hidden></p>
+    <svg class="sky" id="sky" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="sunGlow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
+          <feGaussianBlur stdDeviation="7"/>
+        </filter>
+        <mask id="pathMask" maskUnits="userSpaceOnUse" x="-10000" y="-10000" width="20000" height="20000">
+          <rect x="-10000" y="-10000" width="20000" height="20000" fill="#fff"/>
+          <circle id="maskHole" r="37.5" cx="-999" cy="-999" fill="#000"/>
+          <g id="dotHoles" fill="#000"></g>
+        </mask>
+      </defs>
+      <path id="sunPath" mask="url(#pathMask)" fill="none" stroke="#FFBB00" stroke-linecap="round" stroke-linejoin="round"/>
+      <g id="hourDots"></g>
+      <g id="sunMark" visibility="hidden">
+        <circle r="32.5" fill="#FFBB00" filter="url(#sunGlow)"/>
+        <circle r="18.5" fill="#222326"/>
+      </g>
+      <g id="sunEdge" visibility="hidden">
+        <circle r="16" fill="rgba(34,35,38,0.84)"/>
+        <path d="M-3 -6 L4 0 L-3 6" fill="none" stroke="#FFBB00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </svg>
+    <div class="look" id="look" aria-hidden="true"></div>
+
+    <section class="picker" aria-label="Дата и время">
+      <div class="row row--time">
+        <div class="strip" id="timeStrip" tabindex="0" role="slider" aria-label="Время суток"></div>
+        <div class="pill pill--time" aria-hidden="true">
+          <span class="p-num" id="timeNum">07</span>
+          <span class="p-sub" id="timeSub">am</span>
+        </div>
+      </div>
+      <div class="row row--day">
+        <div class="strip" id="dayStrip" tabindex="0" role="slider" aria-label="Число"></div>
+        <div class="pill" aria-hidden="true"><span class="p-num" id="dayNum">19</span></div>
+      </div>
+      <div class="row row--month">
+        <div class="strip" id="monthStrip" tabindex="0" role="slider" aria-label="Месяц"></div>
+        <div class="pill" aria-hidden="true"><span class="p-month" id="monthName">Feb</span></div>
+      </div>
+    </section>
+  </main>
+
+<script>
+(function () {
+  const YEAR = 2026;
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const MONTHS_FULL = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+  const DOT_SVG = '<svg class="t-dot" viewBox="0 0 3 2" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0 0.984375C0 0.703125 0.0849609 0.46875 0.254883 0.28125C0.424805 0.09375 0.676758 0 1.01074 0C1.33887 0 1.58789 0.09375 1.75781 0.28125C1.93359 0.46875 2.02148 0.703125 2.02148 0.984375C2.02148 1.25977 1.93359 1.49121 1.75781 1.67871C1.58789 1.86035 1.33887 1.95117 1.01074 1.95117C0.676758 1.95117 0.424805 1.86035 0.254883 1.67871C0.0849609 1.49121 0 1.25977 0 0.984375Z" fill="#B9B9B9"/></svg>';
+
+  const daysInMonth = m => new Date(YEAR, m + 1, 0).getDate();
+  const pad2 = n => String(n).padStart(2, "0");
+  const hour12 = h => { const x = h % 12; return x === 0 ? 12 : x; };
+  const ampm = h => (h < 12 ? "am" : "pm");
+
+  // ---------- Carousel with inertia ----------
+  // Deceleration per millisecond, close to iOS scroll views (UIScrollView.DecelerationRate.normal)
+  const DECEL = 0.9985;
+  const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function Carousel(strip, step, onChange) {
+    this.strip = strip; this.step = step; this.onChange = onChange;
+    this.count = 0; this.index = -1; this.pos = 0; this.anim = 0;
+    this.following = false; this.target = -1; this.html = null; this.range = [-1, -1]; this.side = 0;
+    this.track = document.createElement("div");
+    this.track.className = "track";
+    strip.appendChild(this.track);
+    const self = this;
+
+    // Finger / mouse drag with velocity tracking
+    let startX = 0, startPos = 0, moved = false, samples = [];
+    self.dragging = false;
+    strip.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      self.stop();                       // catching a spinning carousel stops it
+      self.following = false;
+      self.dragging = true; moved = false;
+      startX = e.clientX; self.startPos = self.pos;
+      samples = [{ t: e.timeStamp, x: e.clientX }];
+      strip.classList.add("is-dragging");
+      strip.setPointerCapture(e.pointerId);
+    });
+    strip.addEventListener("pointermove", e => {
+      if (!self.dragging) return;
+      const dx = e.clientX - startX;
+      if (Math.abs(dx) > 4) moved = true;
+      self.setPos(self.rubber(self.startPos - dx));
+      samples.push({ t: e.timeStamp, x: e.clientX });
+      while (samples.length > 2 && e.timeStamp - samples[0].t > 60) samples.shift();
+    });
+    const release = e => {
+      if (!self.dragging) return;
+      self.dragging = false;
+      strip.classList.remove("is-dragging");
+      if (!moved) {
+        if (e.type !== "pointerup") { self.animateTo(self.nearest()); return; }
+        // Tap: bring the tapped value under the selection
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        const item = hit && hit.closest(".item");
+        self.animateTo(item && strip.contains(item) ? Number(item.dataset.i) : self.nearest());
+        return;
+      }
+      // Release speed over the last ~100 ms, px per ms (positive = values move left)
+      let v = 0;
+      const first = samples[0], last = samples[samples.length - 1];
+      const dt = last.t - first.t;
+      if (dt > 0 && e.timeStamp - last.t < 80) v = -(last.x - first.x) / dt;
+      self.fling(v);
+    };
+    strip.addEventListener("pointerup", release);
+    strip.addEventListener("pointercancel", release);
+    // Fallbacks: some in-app browsers drop pointerup — release on lost capture or touchend instead
+    strip.addEventListener("lostpointercapture", release);
+    strip.addEventListener("touchend", e => {
+      const t = e.changedTouches[0];
+      setTimeout(() => release({ type: "touchend", timeStamp: e.timeStamp, clientX: t ? t.clientX : 0, clientY: t ? t.clientY : 0 }), 0);
+    });
+    strip.addEventListener("touchcancel", e => {
+      setTimeout(() => release({ type: "touchcancel", timeStamp: e.timeStamp, clientX: 0, clientY: 0 }), 0);
+    });
+    // Keep iOS from taking over the swipe (page scroll, back gesture), which used to cancel the throw
+    strip.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
+
+    // Trackpad / mouse wheel
+    let wheelTimer = 0;
+    strip.addEventListener("wheel", e => {
+      e.preventDefault();
+      self.stop();
+      self.following = false;
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      self.setPos(Math.max(0, Math.min(self.max(), self.pos + d)));
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => self.animateTo(self.nearest()), 140);
+    }, { passive: false });
+
+    // Keyboard
+    strip.addEventListener("keydown", e => {
+      self.following = false;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") { self.animateTo(self.nearest() + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft"  || e.key === "ArrowDown") { self.animateTo(self.nearest() - 1); e.preventDefault(); }
+    });
+  }
+  // Items are virtualised: only the ones near the visible area exist in the page
+  Carousel.prototype.render = function (count, html) {
+    this.count = count;
+    this.html = html;
+    this.layout();
+  };
+  Carousel.prototype.layout = function () {
+    this.side = this.strip.clientWidth / 2 - this.step / 2;
+    this.track.innerHTML = "";
+    this.range = [-1, -1];
+    this.paint();
+  };
+  Carousel.prototype.paint = function () {
+    if (!this.html || !this.count) return;
+    const W = this.strip.clientWidth || 400;
+    const first = Math.max(0, Math.floor((this.pos - this.side) / this.step) - 3);
+    const last = Math.min(this.count - 1, Math.ceil((this.pos + W - this.side) / this.step) + 3);
+    if (first === this.range[0] && last === this.range[1]) return;
+    for (const el of Array.from(this.track.children)) {
+      const i = Number(el.dataset.i);
+      if (i < first || i > last) el.remove();
+    }
+    const [a, b] = this.range;
+    for (let i = first; i <= last; i++) {
+      if (i >= a && i <= b && a !== -1) continue;
+      const el = document.createElement("div");
+      el.className = "item";
+      el.dataset.i = i;
+      el.style.left = (this.side + i * this.step) + "px";
+      el.innerHTML = this.html(i);
+      this.track.appendChild(el);
+    }
+    this.range = [first, last];
+  };
+  Carousel.prototype.max = function () { return Math.max(0, (this.count - 1) * this.step); };
+  // Resistance when pulled past the first or last value
+  Carousel.prototype.rubber = function (p) {
+    const max = this.max();
+    if (p < 0) return p * 0.35;
+    if (p > max) return max + (p - max) * 0.35;
+    return p;
+  };
+  Carousel.prototype.setPos = function (p) {
+    this.pos = p;
+    this.track.style.transform = "translate3d(" + (-p) + "px,0,0)";
+    this.paint();
+    this.sync();
+  };
+  Carousel.prototype.nearest = function () {
+    const i = Math.round(this.pos / this.step);
+    return Math.max(0, Math.min(this.count - 1, i));
+  };
+  Carousel.prototype.stop = function () {
+    if (this.anim) cancelAnimationFrame(this.anim);
+    this.anim = 0;
+  };
+  // Project where the throw would coast to, then land exactly on the nearest value there
+  Carousel.prototype.fling = function (v) {
+    // A slow release is not a throw: just settle on the nearest value
+    if (Math.abs(v) < 0.25) { this.animateTo(this.nearest()); return; }
+    const projected = this.pos + v * DECEL / (1 - DECEL);
+    this.animateTo(Math.round(projected / this.step), v);
+  };
+  Carousel.prototype.animateTo = function (i, v, duration) {
+    this.stop();
+    i = Math.max(0, Math.min(this.count - 1, i));
+    this.target = i;
+    const from = this.pos, to = i * this.step, dist = to - from;
+    if (reduceMotion() || Math.abs(dist) < 0.5) { this.setPos(to); this.following = false; return; }
+    // Ease-out cubic starts at speed 3·dist/T — pick T so it matches the finger's speed
+    let T = 320;
+    if (v && Math.sign(v) === Math.sign(dist)) T = 3 * Math.abs(dist) / Math.abs(v);
+    T = Math.max(260, Math.min(1800, T, 300 + Math.abs(dist) * 1.5));
+    if (duration) T = duration;
+    const self = this, t0 = performance.now();
+    this.a = { from };
+    const tick = now => {
+      const k = Math.min(1, (now - t0) / T);
+      self.setPos(self.a.from + dist * (1 - Math.pow(1 - k, 3)));
+      self.anim = k < 1 ? requestAnimationFrame(tick) : 0;
+      if (k >= 1) self.following = false;
+    };
+    this.anim = requestAnimationFrame(tick);
+  };
+  // Jump by whole items without any visible motion (used by the 24-hour time loop:
+  // labels repeat every 48 items, so moving by whole days looks like standing still)
+  Carousel.prototype.shift = function (items) {
+    if (!items) return;
+    const dp = items * this.step;
+    if (this.a) this.a.from += dp;
+    if (this.dragging) this.startPos += dp;
+    if (this.target >= 0) this.target += items;
+    const was = this.following;
+    this.following = true;
+    this.setPos(this.pos + dp);
+    this.following = was;
+  };
+  // Appear on an item instantly, with no glide
+  Carousel.prototype.jumpTo = function (i) {
+    i = Math.max(0, Math.min(this.count - 1, i));
+    if (this.dragging) return;
+    this.stop();
+    this.target = i;
+    this.following = true;
+    this.setPos(i * this.step);
+    this.following = false;
+  };
+  // Where a strip is (or is heading, if it is gliding to a linked value)
+  Carousel.prototype.settled = function () { return this.anim && this.target >= 0 ? this.target : this.nearest(); };
+  // Moved by another strip (not by the person): quick glide to the linked value
+  Carousel.prototype.followTo = function (i) {
+    i = Math.max(0, Math.min(this.count - 1, i));
+    if (this.dragging) return;
+    if (i === this.target && (this.anim || Math.abs(this.pos - i * this.step) < 0.5)) return;
+    this.following = true;
+    this.animateTo(i, 0, 280);
+  };
+  Carousel.prototype.goTo = function (i, smooth) {
+    if (smooth) { this.animateTo(i); return; }
+    this.stop();
+    i = Math.max(0, Math.min(this.count - 1, i));
+    this.setPos(i * this.step);
+  };
+  Carousel.prototype.sync = function () {
+    const i = this.nearest();
+    if (i !== this.index) { this.index = i; this.onChange(i); }
+  };
+
+  // ---------- The whole year 2026 ----------
+  const MONTH_START = [], DAY_MONTH = [], DAY_OF_MONTH = [];
+  let TOTAL_DAYS = 0;
+  for (let m = 0; m < 12; m++) {
+    MONTH_START.push(TOTAL_DAYS);
+    for (let k = 1; k <= daysInMonth(m); k++) { DAY_MONTH.push(m); DAY_OF_MONTH.push(k); }
+    TOTAL_DAYS += daysInMonth(m);
+  }
+  let linking = false;   // strips start moving each other once the initial state is set
+  let wantedDom = 1;     // the day number the person chose; kept when months change
+  let monthJump = false; // true while the month strip repositions the days
+
+  // ---------- Time: every half hour of the year ----------
+  const timeNum = document.getElementById("timeNum");
+  const timeSub = document.getElementById("timeSub");
+  const timeStrip = document.getElementById("timeStrip");
+  const time = new Carousel(timeStrip, 29, i => {
+    const slot = i % 48, h = Math.floor(slot / 2), half = slot % 2 === 1;
+    timeNum.textContent = pad2(hour12(h));
+    timeSub.textContent = half ? "30" : ampm(h);
+    timeStrip.setAttribute("aria-valuetext", pad2(h) + ":" + (half ? "30" : "00"));
+    if (!linking || time.following) return;
+    const d = Math.floor(i / 48);   // crossing midnight changes the day,
+    day.followTo(d);
+    month.followTo(DAY_MONTH[d]);   // and the end of a month changes the month
+  });
+  time.render(TOTAL_DAYS * 48, i => {
+    if (i % 2 === 1) return DOT_SVG;
+    const h = (i % 48) / 2;
+    return '<span class="t-num">' + pad2(hour12(h)) + '</span><span class="t-sub">' + ampm(h) + "</span>";
+  });
+
+  // ---------- Day: every day of the year ----------
+  const dayNum = document.getElementById("dayNum");
+  const dayStrip = document.getElementById("dayStrip");
+  const day = new Carousel(dayStrip, 44, i => {
+    dayNum.textContent = String(DAY_OF_MONTH[i]);
+    dayStrip.setAttribute("aria-valuetext", DAY_OF_MONTH[i] + " " + MONTHS_FULL[DAY_MONTH[i]]);
+    if (!monthJump) wantedDom = DAY_OF_MONTH[i];
+    if (!linking || day.following) return;
+    timeToDay(i);   // the time loop stays put, only the date under it changes
+    month.followTo(DAY_MONTH[i]);
+  });
+  day.render(TOTAL_DAYS, i => '<span class="d-num">' + DAY_OF_MONTH[i] + "</span>");
+
+  // ---------- Month ----------
+  const monthName = document.getElementById("monthName");
+  const monthStrip = document.getElementById("monthStrip");
+  const month = new Carousel(monthStrip, 44, m => {
+    monthName.textContent = MONTHS[m];
+    monthStrip.setAttribute("aria-valuetext", MONTHS_FULL[m] + " " + YEAR);
+    if (!linking || month.following) return;
+    // Same day number, or the month's last day if it is shorter; the days strip
+    // appears on it instantly instead of scrolling, so it looks as if it never moved
+    const d = MONTH_START[m] + Math.min(wantedDom, daysInMonth(m)) - 1;
+    monthJump = true;
+    day.jumpTo(d);
+    monthJump = false;
+    timeToDay(d);
+  });
+  month.render(12, i => '<span class="m-name">' + MONTHS[i] + "</span>");
+
+  // The time strip looks like an endless 24-hour loop: changing the date elsewhere
+  // re-anchors it to the new day instantly, so the hours under the selection don't move
+  function timeToDay(d) {
+    const current = Math.floor(time.settled() / 48);
+    time.shift((d - current) * 48);
+  }
+
+  // Magnet: whenever a strip comes to rest between two values, pull it under the selection
+  setInterval(() => {
+    [time, day, month].forEach(c => {
+      if (c.dragging || c.anim) return;
+      if (Math.abs(c.pos - c.nearest() * c.step) > 0.5) c.animateTo(c.nearest());
+    });
+  }, 150);
+
+  // ---------- Initial state from the mockup: 07 am, 19 Feb 2026 ----------
+  function init() {
+    const d = MONTH_START[1] + 18;    // 19 Feb
+    month.goTo(1, false);
+    day.goTo(d, false);
+    time.goTo(d * 48 + 14, false);    // 07:00
+  }
+
+  // ---------- AR: camera, location, orientation ----------
+  const RAD = Math.PI / 180;
+  const FOV_LONG = 64 * RAD;   // iPhone main camera in video mode, along the long side of the frame
+  const cam = document.getElementById("cam");
+  const camBtn = document.getElementById("camBtn");
+  const statusEl = document.getElementById("status");
+  const stageEl = document.getElementById("stage");
+  const skyEl = document.getElementById("sky");
+  const pathEl = document.getElementById("sunPath");
+  const dotsEl = document.getElementById("hourDots");
+  const sunEl = document.getElementById("sunMark");
+  const edgeEl = document.getElementById("sunEdge");
+  const holeEl = document.getElementById("maskHole");
+  const dotHolesEl = document.getElementById("dotHoles");
+  const lookEl = document.getElementById("look");
+
+  // Fallback location until the device shares its own: Belgrade
+  const ar = { lat: 44.8125, lon: 20.4612, sensors: false, Rs: null, offset: null, userYaw: 0, yaw: Math.PI, pitch: 20 * RAD };
+
+  let statusTimer = 0;
+  function showStatus(text, ms) {
+    statusEl.textContent = text;
+    statusEl.hidden = false;
+    clearTimeout(statusTimer);
+    if (ms) statusTimer = setTimeout(() => { statusEl.hidden = true; }, ms);
+  }
+
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+  // Sun altitude and azimuth (from north, clockwise) — standard low-precision solar ephemeris
+  function sunPosition(date, lat, lon) {
+    const d = date.getTime() / 864e5 - 0.5 + 2440588 - 2451545;
+    const M = RAD * (357.5291 + 0.98560028 * d);
+    const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    const L = M + C + RAD * 102.9372 + Math.PI;
+    const e = RAD * 23.4397;
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+    const H = RAD * (280.16 + 360.9856235 * d) + RAD * lon - ra;
+    const phi = RAD * lat;
+    const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+    const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)) + Math.PI;
+    return { alt, az };
+  }
+  // Direction in Earth frame: x East, y North, z Up
+  const toVec = p => [Math.cos(p.alt) * Math.sin(p.az), Math.cos(p.alt) * Math.cos(p.az), Math.sin(p.alt)];
+
+  // Device axes (x right, y top, z out of the screen) in Earth frame, from W3C DeviceOrientation angles
+  function matFromEuler(alpha, beta, gamma) {
+    const a = alpha * RAD, b = beta * RAD, g = gamma * RAD;
+    const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
+    return [
+      [cA * cG - sA * sB * sG, cG * sA + cA * sB * sG, -cB * sG],
+      [-cB * sA, cA * cB, sB],
+      [cA * sG + cG * sA * sB, sA * sG - cA * cG * sB, cB * cG]
+    ];
+  }
+  // Upright phone looking toward azimuth `yaw`, tilted up by `pitch` (used without sensors)
+  function matFromLook(yaw, pitch) {
+    const f = [Math.cos(pitch) * Math.sin(yaw), Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch)];
+    const x = [Math.cos(yaw), -Math.sin(yaw), 0];
+    const z = [-f[0], -f[1], -f[2]];
+    return [x, cross(z, x), z];
+  }
+  function rotateYaw(Mx, t) {
+    const c = Math.cos(t), s = Math.sin(t);
+    return Mx.map(v => [v[0] * c + v[1] * s, -v[0] * s + v[1] * c, v[2]]);
+  }
+  function orthonormalize(Mx) {
+    const x = norm(Mx[0]);
+    const k = dot(Mx[1], x);
+    const y = norm([Mx[1][0] - k * x[0], Mx[1][1] - k * x[1], Mx[1][2] - k * x[2]]);
+    return [x, y, cross(x, y)];
+  }
+
+  function onOrientation(e) {
+    if (e.alpha == null || e.beta == null || e.gamma == null) return;
+    const Mx = matFromEuler(e.alpha, e.beta, e.gamma);
+    if (typeof e.webkitCompassHeading === "number" && e.webkitCompassHeading >= 0) {
+      // iOS: alpha is relative, so align it to the compass. Upright phone → heading of the back camera, flat → of the top edge
+      const fx = -Mx[2][0], fy = -Mx[2][1];
+      const az = Math.hypot(fx, fy) > 0.5 ? Math.atan2(fx, fy) : Math.atan2(Mx[1][0], Mx[1][1]);
+      const off = wrapPi(e.webkitCompassHeading * RAD - az);
+      ar.offset = ar.offset == null ? off : wrapPi(ar.offset + wrapPi(off - ar.offset) * 0.08);
+    } else if (e.absolute || e.type === "deviceorientationabsolute") {
+      ar.offset = 0;
+    }
+    // Smooth the rotation itself (Euler angles jump when the phone is held upright)
+    ar.Rs = ar.Rs ? orthonormalize(ar.Rs.map((v, i) => v.map((c, j) => c + (Mx[i][j] - c) * 0.3))) : Mx;
+    if (!ar.sensors) {
+      ar.sensors = true;
+      showStatus("Если траектория смещена относительно настоящего солнца, сдвиньте небо пальцем влево или вправо", 6000);
+    }
+  }
+  function currentMatrix() {
+    if (ar.sensors && ar.Rs) return rotateYaw(ar.Rs, (ar.offset || 0) + ar.userYaw);
+    return matFromLook(ar.yaw, ar.pitch);
+  }
+
+  function selectedDate() {
+    const ti = Math.max(0, time.index);
+    const slot = ti % 48;
+    return new Date(YEAR, 0, 1 + Math.floor(ti / 48), Math.floor(slot / 2), slot % 2 ? 30 : 0, 0);
+  }
+
+  // Continuous time for the sun: follows the time strip's exact scroll position, not just the snapped value
+  function sunDate() {
+    const steps = Math.max(0, Math.min(time.count - 1, time.pos / time.step));
+    const d = Math.floor(steps / 48);
+    const midnight = new Date(YEAR, 0, 1 + d).getTime();
+    return new Date(midnight + (steps - d * 48) * 30 * 60000);
+  }
+
+  // Trajectory for the selected day, every 5 minutes, above the horizon only
+  let pathKey = "", pathPts = [], hourPts = [];
+  function computePath() {
+    const base = sunDate();
+    const key = base.toDateString() + "|" + ar.lat.toFixed(4) + "|" + ar.lon.toFixed(4);
+    if (key === pathKey) return;
+    pathKey = key; pathPts = []; hourPts = [];
+    const y = base.getFullYear(), mo = base.getMonth(), da = base.getDate();
+    for (let min = 0; min <= 1440; min += 5) {
+      const p = sunPosition(new Date(y, mo, da, 0, min), ar.lat, ar.lon);
+      const up = p.alt > -0.83 * RAD;
+      pathPts.push({ v: toVec(p), up });
+      if (min % 30 === 0 && min < 1440 && up) hourPts.push(toVec(p));
+    }
+  }
+
+  function frame() {
+    computePath();
+    const W = stageEl.clientWidth, H = stageEl.clientHeight;
+    skyEl.setAttribute("viewBox", "0 0 " + W + " " + H);
+    const R = currentMatrix();
+    // Pinhole camera matched to the video as it is shown (object-fit: cover)
+    const vw = cam.videoWidth || 1080, vh = cam.videoHeight || 1920;
+    const f = (Math.max(vw, vh) / 2) / Math.tan(FOV_LONG / 2) * Math.max(W / vw, H / vh);
+    const cx = W / 2, cy = H / 2;
+    const raw = v => [dot(R[0], v), dot(R[1], v), dot(R[2], v)];
+    const proj = v => {
+      const d = raw(v), depth = -d[2];
+      if (depth < 0.05) return null;
+      const X = cx + f * d[0] / depth, Y = cy - f * d[1] / depth;
+      return Math.abs(X - cx) > 6 * W || Math.abs(Y - cy) > 6 * H ? null : [X, Y];
+    };
+
+    let d = "", pen = false;
+    for (const p of pathPts) {
+      const q = p.up ? proj(p.v) : null;
+      if (!q) { pen = false; continue; }
+      d += (pen ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+      pen = true;
+    }
+    pathEl.setAttribute("d", d);
+
+    // 30-minute segments: a gap around every half-hour point, with a dot in it
+    let dots = "", holes = "";
+    for (const v of hourPts) {
+      const q = proj(v);
+      if (!q) continue;
+      const x = q[0].toFixed(1), y = q[1].toFixed(1);
+      dots += '<circle cx="' + x + '" cy="' + y + '" r="2" fill="#222326" stroke="#FFBB00"/>';
+      holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
+    }
+    dotsEl.innerHTML = dots;
+    dotHolesEl.innerHTML = holes;
+
+    const sp = sunPosition(sunDate(), ar.lat, ar.lon);
+    const sv = toVec(sp), sq = proj(sv);
+    const onScreen = !!sq && sq[0] > -20 && sq[0] < W + 20 && sq[1] > -20 && sq[1] < H + 20;
+    if (onScreen) {
+      sunEl.setAttribute("transform", "translate(" + sq[0].toFixed(1) + " " + sq[1].toFixed(1) + ")");
+      holeEl.setAttribute("cx", sq[0].toFixed(1)); holeEl.setAttribute("cy", sq[1].toFixed(1));
+    } else {
+      holeEl.setAttribute("cx", "-999"); holeEl.setAttribute("cy", "-999");
+    }
+    sunEl.setAttribute("visibility", onScreen ? "visible" : "hidden");
+    sunEl.setAttribute("opacity", sp.alt < 0 ? "0.45" : "1");
+
+    // Sun out of view: arrow at the screen edge pointing toward it
+    if (!onScreen) {
+      const r = raw(sv);
+      const ang = Math.atan2(-r[1], r[0]);
+      const ux = Math.cos(ang), uy = Math.sin(ang);
+      const m = 30, top = m + 50, bottom = H - 250;
+      const tx = Math.abs(ux) > 1e-6 ? ((ux > 0 ? W - m : m) - cx) / ux : Infinity;
+      const ty = Math.abs(uy) > 1e-6 ? ((uy > 0 ? bottom : top) - cy) / uy : Infinity;
+      const t = Math.min(tx, ty);
+      edgeEl.setAttribute("transform", "translate(" + (cx + ux * t).toFixed(1) + " " + (cy + uy * t).toFixed(1) + ") rotate(" + (ang / RAD).toFixed(1) + ")");
+      edgeEl.setAttribute("visibility", "visible");
+    } else {
+      edgeEl.setAttribute("visibility", "hidden");
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // Drag the sky: look around without sensors, or correct the compass with them
+  let lookDrag = null;
+  lookEl.addEventListener("pointerdown", e => { lookDrag = { x: e.clientX, y: e.clientY }; lookEl.setPointerCapture(e.pointerId); });
+  lookEl.addEventListener("pointermove", e => {
+    if (!lookDrag) return;
+    const dx = e.clientX - lookDrag.x, dy = e.clientY - lookDrag.y;
+    lookDrag = { x: e.clientX, y: e.clientY };
+    const k = FOV_LONG / stageEl.clientHeight;
+    if (ar.sensors) ar.userYaw -= dx * k;
+    else { ar.yaw -= dx * k; ar.pitch = Math.max(-80 * RAD, Math.min(85 * RAD, ar.pitch + dy * k)); }
+  });
+  const endLook = () => { lookDrag = null; };
+  lookEl.addEventListener("pointerup", endLook);
+  lookEl.addEventListener("pointercancel", endLook);
+  lookEl.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
+
+  function startCameraStream() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.resolve(false);
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    }).then(stream => {
+      cam.srcObject = stream;
+      return cam.play().then(() => { stageEl.classList.add("has-cam"); return true; });
+    }).catch(() => false);
+  }
+
+  async function startAR() {
+    // All three requests start inside the tap itself — iOS only shows permission prompts for a direct user action
+    const oriP = (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === "function")
+      ? DeviceOrientationEvent.requestPermission().catch(() => "denied")
+      : Promise.resolve("granted");
+    const camP = startCameraStream();
+    const locP = new Promise(res => {
+      if (!navigator.geolocation) { res(null); return; }
+      navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 600000 });
+    });
+    camBtn.disabled = true;
+    camBtn.textContent = "Включаю…";
+    const [ori, camOk, pos] = await Promise.all([oriP, camP, locP]);
+
+    if (ori === "granted") {
+      window.addEventListener("ondeviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation", onOrientation);
+    }
+    if (pos) { ar.lat = pos.coords.latitude; ar.lon = pos.coords.longitude; pathKey = ""; }
+    stageEl.classList.add("ar-on");
+
+    setTimeout(() => {
+      const missing = [];
+      if (!camOk) missing.push("камере");
+      if (!pos) missing.push("геолокации");
+      if (ori !== "granted") missing.push("датчикам движения");
+      const parts = [];
+      if (missing.length) parts.push("Нет доступа к " + missing.join(", ") + ".");
+      if (!pos) parts.push("Траектория показана для Белграда.");
+      if (!ar.sensors) parts.push("Перетаскивайте небо, чтобы осмотреться.");
+      if (parts.length) showStatus(parts.join(" "), 8000);
+    }, 1200);
+  }
+  camBtn.addEventListener("click", startAR);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && cam.srcObject) cam.play().catch(() => {});
+  });
+
+  // Desktop: scale the 393×852 frame to fit the window
+  const stage = document.getElementById("stage");
+  function fit() {
+    if (window.innerWidth > 500) {
+      const s = Math.min(1, (window.innerHeight - 32) / 852, (window.innerWidth - 32) / 393);
+      stage.style.transform = "scale(" + s + ")";
+    } else {
+      stage.style.transform = "";
+    }
+    [time, day, month].forEach(c => { const i = c.nearest(); c.layout(); c.goTo(i, false); });
+  }
+  window.addEventListener("resize", fit);
+
+  const start = () => {
+    fit(); init(); linking = true;
+    // Without sensors, start by looking toward the sun at the selected time
+    const sp = sunPosition(selectedDate(), ar.lat, ar.lon);
+    ar.yaw = sp.az;
+    ar.pitch = Math.max(-10 * RAD, sp.alt - 8 * RAD);
+    requestAnimationFrame(frame);
+  };
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(start); else start();
+})();
+</script>
+</body>
+</html>
