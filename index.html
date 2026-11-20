@@ -640,7 +640,43 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   // re-anchors it to the new day instantly, so the hours under the selection don't move
   function timeToDay(d) {
     const current = Math.floor(time.settled() / 48);
+    if (d !== current) crossfadeSky();
     time.shift((d - current) * 48);
+  }
+
+  // Date changed through the day or month strip: the arc, dots, sun and bubbles of the old date
+  // fade out while the new ones fade in (same 0.15 s fade as the bubbles), instead of a hard cut.
+  // The old picture is a copy of the last drawn frame, with its ids renamed so nothing else uses it.
+  // Several date changes in a row (a month strip gliding past months) make one crossfade: the old
+  // date fades out while the new picture fades in at the same time, and keeps following the date.
+  let xfTimer = 0;
+  function crossfadeSky() {
+    const live = [document.getElementById("sky"), document.getElementById("hourLabels")];
+    const running = !!document.querySelector(".is-ghost");
+    if (!running) {
+      for (const el of live) {
+        if (!el) continue;
+        const html = el.outerHTML
+          .replace(/ id="([^"]+)"/g, ' id="$1-ghost"')
+          .replace(/url\(#([^)]+)\)/g, "url(#$1-ghost)");
+        el.insertAdjacentHTML("beforebegin", html);
+        const ghost = el.previousElementSibling;
+        ghost.classList.add("is-ghost");
+        ghost.style.pointerEvents = "none";
+        ghost.style.transition = "opacity .15s ease";
+        ghost.style.opacity = "1";
+        el.style.transition = "none";
+        el.style.opacity = "0";
+        void el.offsetWidth;
+        requestAnimationFrame(() => {
+          ghost.style.opacity = "0";
+          el.style.transition = "opacity .15s ease";
+          el.style.opacity = "1";
+        });
+      }
+    }
+    clearTimeout(xfTimer);
+    xfTimer = setTimeout(() => document.querySelectorAll(".is-ghost").forEach(g => g.remove()), 220);
   }
 
   // Magnet: whenever a strip comes to rest between two values, pull it under the selection
@@ -763,11 +799,16 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     const Mx = matFromEuler(e.alpha, e.beta, e.gamma);
     if (typeof e.webkitCompassHeading === "number" && e.webkitCompassHeading >= 0) {
       // iOS: alpha is relative, so align it to the compass. Upright phone → heading of the back camera, flat → of the top edge
-      const fx = -Mx[2][0], fy = -Mx[2][1];
-      const az = Math.hypot(fx, fy) > 0.5 ? Math.atan2(fx, fy) : Math.atan2(Mx[1][0], Mx[1][1]);
-      // Compass gives magnetic heading; true heading = magnetic + declination
-      const off = wrapPi(e.webkitCompassHeading * RAD + ar.decl - az);
-      ar.offset = ar.offset == null ? off : wrapPi(ar.offset + wrapPi(off - ar.offset) * 0.08);
+      const fx = -Mx[2][0], fy = -Mx[2][1], horiz = Math.hypot(fx, fy);
+      // Trust the compass only while the camera looks roughly at the horizon (within ~45°).
+      // Aimed at the sky or the floor, iOS switches the edge its heading refers to, which would
+      // swing the whole sky by up to 180°; the gyroscope keeps the last good alignment instead.
+      if (horiz > 0.7 || ar.offset == null) {
+        const az = horiz > 0.5 ? Math.atan2(fx, fy) : Math.atan2(Mx[1][0], Mx[1][1]);
+        // Compass gives magnetic heading; true heading = magnetic + declination
+        const off = wrapPi(e.webkitCompassHeading * RAD + ar.decl - az);
+        ar.offset = ar.offset == null ? off : wrapPi(ar.offset + wrapPi(off - ar.offset) * 0.08);
+      }
     } else if (e.absolute || e.type === "deviceorientationabsolute") {
       ar.offset = ar.decl;   // absolute alpha is referenced to magnetic north as well
     }
@@ -844,14 +885,14 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
         }
         const pe = at((lo + hi) / 2), v = toVec(pe);
         pathPts.push({ v, up: true });
-        eventPts.push({ v, min: (lo + hi) / 2, label: fmtTime((lo + hi) / 2) });
+        eventPts.push({ v, va: toVec(at((lo + hi) / 2 - 3)), vb: toVec(at((lo + hi) / 2 + 3)), min: (lo + hi) / 2, label: fmtTime((lo + hi) / 2) });
       }
       pathPts.push({ v: toVec(p), up });
       prev = { up };
       // Every half hour gets a dot (also before sunrise and after sunset); full hours get a bubble
       if (min % 30 === 0 && min < 1440) {
         const h = min / 60;
-        hourPts.push({ v: toVec(p), up, h, min, label: min % 60 === 0 ? [String(hour12(h)), ampm(h).toUpperCase()] : null });
+        hourPts.push({ v: toVec(p), va: toVec(at(min - 3)), vb: toVec(at(min + 3)), up, h, min, label: min % 60 === 0 ? [String(hour12(h)), ampm(h).toUpperCase()] : null });
       }
     }
     // The dot closest to sunrise or sunset (whichever half hour it is) gets no hour bubble:
@@ -923,7 +964,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const x = q[0].toFixed(1), y = q[1].toFixed(1);
       dots += '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#FFBB00"/>';
       if (hp.up) holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
-      if (hp.label) bubbles[hp.h] = { q, label: hp.label };
+      if (hp.label) bubbles[hp.h] = { q, qa: proj(hp.va), qb: proj(hp.vb), label: hp.label };
     }
     // Sunrise and sunset: white dot where the arc ends, with the exact time
     eventPts.forEach((ev, k) => {
@@ -932,7 +973,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const x = q[0].toFixed(1), y = q[1].toFixed(1);
       dots += '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#FFFFFF"/>';
       holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
-      if (k < 2) bubbles[24 + k] = { q, label: ev.label };
+      if (k < 2) bubbles[24 + k] = { q, qa: proj(ev.va), qb: proj(ev.vb), label: ev.label };
     });
     dotsEl.innerHTML = dots;
     dotHolesEl.innerHTML = holes;
@@ -964,41 +1005,20 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
         el.dataset.t = text;
         el._w = el.offsetWidth; el._h = el.offsetHeight;
       }
-      // Default spot is below-right of the dot (as in the mockup); if the line comes within 4 px of it,
-      // try above-right, above-left, below-left; if every side is too close (a flat stretch of the line),
-      // move the bubble a little further from the dot vertically until it clears
+      // Always below the arc, square to it: the bubble sits on the line's normal that points down
+      // the screen, with its nearest edge 8 px from the dot. It turns smoothly around its dot as the
+      // arc tilts, never jumps, and never crosses the line (drawn or not, below the horizon).
       const w = el._w, h = el._h, dx = b.q[0], dy = b.q[1];
-      const spotAt = (s, g) => s === 0 ? [dx + 2, dy + g] : s === 1 ? [dx + 2, dy - g - h] : s === 2 ? [dx - 2 - w, dy - g - h] : [dx - 2 - w, dy + g];
-      const clear = (s, g, m) => { const p = spotAt(s, g); return !rectHitsLine(p[0], p[1], w, h, dx, dy, segs, m); };
-      // Fixed place relative to the dot: 2 px to the side and 8 px above or below it.
-      // Only the side can change, and only when the line actually runs into the bubble.
-      const G = 8;
-      let pick = -1;
-      const curS = el._shown ? el._shown.s : el._spot;
-      if (curS != null && clear(curS, G, 4)) pick = curS;                      // stay while more than 4 px from the line
-      if (pick < 0) for (let s = 0; s < 4; s++) if (clear(s, G, 4)) { pick = s; break; }   // a side with more than 4 px
-      if (pick < 0) pick = curS != null ? curS : 0;
-      const gap = G;
-      el._spot = pick; el._gap = gap;
-      // Changing place: only after the new place has been wanted for a moment (no flicker),
-      // fade out where it is (still following its dot), then move and fade back in
-      const now = performance.now();
-      if (!el._shown) el._shown = { s: pick, g: gap };
-      el._shown.g = gap;
-      const key = String(pick);
-      if (pick !== el._shown.s) {
-        if (el._cand !== key) { el._cand = key; el._candSince = now; }
-        if (!el._fadeUntil && now - el._candSince >= 200) { el._fadeUntil = now + 160; el.classList.add("is-moving"); }
-        else if (el._fadeUntil && now >= el._fadeUntil) {
-          el._shown = { s: pick, g: gap }; el._fadeUntil = 0; el._cand = null;
-          el.classList.remove("is-moving");
-        }
-      } else {
-        el._cand = null;
-        if (el._fadeUntil) { el._fadeUntil = 0; el.classList.remove("is-moving"); }
-      }
-      const at = spotAt(el._shown.s, el._shown.g);
-      const lx = at[0], ly = at[1];
+      let tx = 1, ty = 0;
+      if (b.qa && b.qb) { tx = b.qb[0] - b.qa[0]; ty = b.qb[1] - b.qa[1]; }
+      const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      let nx = -ty, ny = tx;
+      if (ny < 0) { nx = -nx; ny = -ny; }
+      // Nearly vertical arc: "below" is ambiguous, so keep the side it already has
+      if (el._n && Math.abs(ny) < 0.25 && nx * el._n[0] + ny * el._n[1] < 0) { nx = -nx; ny = -ny; }
+      el._n = [nx, ny];
+      const reach = 8 + Math.abs(nx) * w / 2 + Math.abs(ny) * h / 2;
+      const lx = dx + nx * reach - w / 2, ly = dy + ny * reach - h / 2;
       el.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
       let covered = false;
       if (onScreen) {
