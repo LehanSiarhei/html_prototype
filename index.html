@@ -13,7 +13,7 @@
     --page-bg: #e6e7ea;
     --panel-bg: rgba(34, 35, 38, 0.84);
     --accent: #ffbb00;
-    --muted: #b9b9b9;
+    --muted: #dddddd;
     --on-accent: #000000;
     box-sizing: border-box;
     padding-top: env(safe-area-inset-top, 0px);
@@ -71,7 +71,7 @@
     display: flex; align-items: flex-end; gap: 2px;
     padding: 1px 7px 3px;
     border-radius: 26px;
-    background: rgba(255, 255, 255, 0.84);
+    background: #dddddd;
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     color: #222326;
     font: 500 14px/18px "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -80,6 +80,8 @@
     transition: opacity .15s ease;
   }
   .hour-label.is-covered, .hour-label.is-moving { opacity: 0; }
+  /* Exact selected time next to the sun */
+  .hour-label.sun-time { background: #FFBB00; color: #000; }
   .picker, .cam-btn, .status { z-index: 2; }
   .status {
     position: absolute; left: 50%; transform: translateX(-50%);
@@ -150,18 +152,6 @@
     position: relative; height: 100%;
     will-change: transform;
   }
-  /* Labels fade out right next to the red selection, keeping a clean gap like in the mockup */
-  .row { --gap: 8px; }
-  .row--time { --gap: 3px; }
-  .strip {
-    --mask: linear-gradient(to right,
-      #000 calc(50% - 23px - var(--gap) - 6px),
-      transparent calc(50% - 23px - var(--gap)),
-      transparent calc(50% + 23px + var(--gap)),
-      #000 calc(50% + 23px + var(--gap) + 6px));
-    -webkit-mask-image: var(--mask);
-    mask-image: var(--mask);
-  }
   .strip::-webkit-scrollbar { display: none; }
   .strip.is-dragging { cursor: grabbing; }
   .strip:focus-visible { outline: none; }
@@ -196,8 +186,17 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     pointer-events: none;
     font-weight: 500; text-align: center; white-space: nowrap;
+    overflow: hidden;
   }
-  .pill--time { gap: 2px; }
+  .pill--time { gap: 2px; overflow: hidden; }
+  /* Inside the time pill: its own strip of large hours, moving with the time strip and clipped by the pill */
+  .pill-track { position: absolute; inset: 0; }
+  .pt-item {
+    position: absolute; left: 50%; top: 50%;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    color: #000; font-weight: 500; white-space: nowrap;
+    will-change: transform;
+  }
   .p-num   { font-size: 28px; line-height: 18px; }
   .p-sub   { font-size: 16px; line-height: 18px; }
   .p-month { font-size: 24px; line-height: normal; letter-spacing: -0.96px; }
@@ -215,6 +214,9 @@
     <p class="status" id="status" role="status" hidden></p>
     <svg class="sky" id="sky" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
       <defs>
+        <filter id="miniGlow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
+          <feGaussianBlur stdDeviation="1.35"/>
+        </filter>
         <filter id="sunGlow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
           <feGaussianBlur stdDeviation="7"/>
         </filter>
@@ -231,8 +233,8 @@
         <circle r="18.5" fill="#FFFFFF"/>
       </g>
       <g id="sunEdge" visibility="hidden">
-        <circle r="16" fill="rgba(34,35,38,0.84)"/>
-        <path d="M-3 -6 L4 0 L-3 6" fill="none" stroke="#FFBB00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle r="6.27" fill="#FFBB00" filter="url(#miniGlow)"/>
+        <circle r="3.57" fill="#FFFFFF"/>
       </g>
     </svg>
     <div class="hour-labels" id="hourLabels" aria-hidden="true"></div>
@@ -242,17 +244,16 @@
       <div class="row row--time">
         <div class="strip" id="timeStrip" tabindex="0" role="slider" aria-label="Время суток"></div>
         <div class="pill pill--time" aria-hidden="true">
-          <span class="p-num" id="timeNum">07</span>
-          <span class="p-sub" id="timeSub">am</span>
+          <div class="pill-track" id="pillTrack"></div>
         </div>
       </div>
       <div class="row row--day">
         <div class="strip" id="dayStrip" tabindex="0" role="slider" aria-label="Число"></div>
-        <div class="pill" aria-hidden="true"><span class="p-num" id="dayNum">19</span></div>
+        <div class="pill" aria-hidden="true"><div class="pill-track" id="dayTrack"></div></div>
       </div>
       <div class="row row--month">
         <div class="strip" id="monthStrip" tabindex="0" role="slider" aria-label="Месяц"></div>
-        <div class="pill" aria-hidden="true"><span class="p-month" id="monthName">Feb</span></div>
+        <div class="pill" aria-hidden="true"><div class="pill-track" id="monthTrack"></div></div>
       </div>
     </section>
   </main>
@@ -266,7 +267,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   const YEAR = 2026;
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const MONTHS_FULL = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
-  const DOT_SVG = '<svg class="t-dot" viewBox="0 0 3 2" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0 0.984375C0 0.703125 0.0849609 0.46875 0.254883 0.28125C0.424805 0.09375 0.676758 0 1.01074 0C1.33887 0 1.58789 0.09375 1.75781 0.28125C1.93359 0.46875 2.02148 0.703125 2.02148 0.984375C2.02148 1.25977 1.93359 1.49121 1.75781 1.67871C1.58789 1.86035 1.33887 1.95117 1.01074 1.95117C0.676758 1.95117 0.424805 1.86035 0.254883 1.67871C0.0849609 1.49121 0 1.25977 0 0.984375Z" fill="#B9B9B9"/></svg>';
+  const DOT_SVG = '<svg class="t-dot" viewBox="0 0 3 2" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0 0.984375C0 0.703125 0.0849609 0.46875 0.254883 0.28125C0.424805 0.09375 0.676758 0 1.01074 0C1.33887 0 1.58789 0.09375 1.75781 0.28125C1.93359 0.46875 2.02148 0.703125 2.02148 0.984375C2.02148 1.25977 1.93359 1.49121 1.75781 1.67871C1.58789 1.86035 1.33887 1.95117 1.01074 1.95117C0.676758 1.95117 0.424805 1.86035 0.254883 1.67871C0.0849609 1.49121 0 1.25977 0 0.984375Z" fill="#DDDDDD"/></svg>';
 
   const daysInMonth = m => new Date(YEAR, m + 1, 0).getDate();
   const pad2 = n => String(n).padStart(2, "0");
@@ -313,11 +314,12 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       self.dragging = false;
       strip.classList.remove("is-dragging");
       if (!moved) {
-        if (e.type !== "pointerup") { self.animateTo(self.nearest()); return; }
+        if (e.type !== "pointerup") { if (!self.free) self.animateTo(self.nearest()); return; }
         // Tap: bring the tapped value under the selection
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const item = hit && hit.closest(".item");
-        self.animateTo(item && strip.contains(item) ? Number(item.dataset.i) : self.nearest());
+        if (item && strip.contains(item)) self.animateTo(Number(item.dataset.i));
+        else if (!self.free) self.animateTo(self.nearest());
         return;
       }
       // Release speed over the last ~100 ms, px per ms (positive = values move left)
@@ -350,7 +352,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       self.setPos(Math.max(0, Math.min(self.max(), self.pos + d)));
       clearTimeout(wheelTimer);
-      wheelTimer = setTimeout(() => self.animateTo(self.nearest()), 140);
+      wheelTimer = setTimeout(() => { if (!self.free) self.animateTo(self.nearest()); }, 140);
     }, { passive: false });
 
     // Keyboard
@@ -406,10 +408,12 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     this.pos = p;
     this.track.style.transform = "translate3d(" + (-p) + "px,0,0)";
     this.paint();
+    if (this.onMove) this.onMove(p);
     this.sync();
   };
   Carousel.prototype.nearest = function () {
-    const i = Math.round(this.pos / this.step);
+    // A free strip (no snapping) reports the value it has reached, not the closest one
+    const i = this.free ? Math.floor(this.pos / this.step + 1e-6) : Math.round(this.pos / this.step);
     return Math.max(0, Math.min(this.count - 1, i));
   };
   Carousel.prototype.stop = function () {
@@ -418,10 +422,34 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   };
   // Project where the throw would coast to, then land exactly on the nearest value there
   Carousel.prototype.fling = function (v) {
+    if (this.free) {
+      // No snapping: a throw coasts and stops wherever it stops; a slow release stays put
+      if (Math.abs(v) < 0.05) { if (this.pos < 0 || this.pos > this.max()) this.glideTo(this.pos); return; }
+      this.glideTo(this.pos + v * DECEL / (1 - DECEL), v);
+      return;
+    }
     // A slow release is not a throw: just settle on the nearest value
     if (Math.abs(v) < 0.25) { this.animateTo(this.nearest()); return; }
     const projected = this.pos + v * DECEL / (1 - DECEL);
     this.animateTo(Math.round(projected / this.step), v);
+  };
+  // Glide to any position (free strips): same ease-out as a throw, starting at the finger's speed
+  Carousel.prototype.glideTo = function (to, v) {
+    this.stop();
+    to = Math.max(0, Math.min(this.max(), to));
+    const from = this.pos, dist = to - from;
+    if (reduceMotion() || Math.abs(dist) < 0.5) { this.setPos(to); return; }
+    let T = 320;
+    if (v && Math.sign(v) === Math.sign(dist)) T = 3 * Math.abs(dist) / Math.abs(v);
+    T = Math.max(200, Math.min(2200, T));
+    const self = this, t0 = performance.now();
+    this.a = { from };
+    const tick = now => {
+      const k = Math.min(1, (now - t0) / T);
+      self.setPos(self.a.from + dist * (1 - Math.pow(1 - k, 3)));
+      self.anim = k < 1 ? requestAnimationFrame(tick) : 0;
+    };
+    this.anim = requestAnimationFrame(tick);
   };
   Carousel.prototype.animateTo = function (i, v, duration) {
     this.stop();
@@ -500,15 +528,10 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   let wantedDom = 1;     // the day number the person chose; kept when months change
   let monthJump = false; // true while the month strip repositions the days
 
-  // ---------- Time: every half hour of the year ----------
-  const timeNum = document.getElementById("timeNum");
-  const timeSub = document.getElementById("timeSub");
+  // ---------- Time: every half hour of the year (scrolls freely, no snapping) ----------
   const timeStrip = document.getElementById("timeStrip");
+  const pillTrack = document.getElementById("pillTrack");
   const time = new Carousel(timeStrip, 29, i => {
-    const slot = i % 48, h = Math.floor(slot / 2), half = slot % 2 === 1;
-    timeNum.textContent = pad2(hour12(h));
-    timeSub.textContent = half ? "30" : ampm(h);
-    timeStrip.setAttribute("aria-valuetext", pad2(h) + ":" + (half ? "30" : "00"));
     if (!linking || time.following) return;
     const d = Math.floor(i / 48);   // crossing midnight changes the day,
     day.followTo(d);
@@ -517,14 +540,53 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   time.render(TOTAL_DAYS * 48, i => {
     if (i % 2 === 1) return DOT_SVG;
     const h = (i % 48) / 2;
-    return '<span class="t-num">' + pad2(hour12(h)) + '</span><span class="t-sub">' + ampm(h) + "</span>";
+    return '<span class="t-num">' + hour12(h) + '</span><span class="t-sub">' + ampm(h) + "</span>";
   });
+  time.free = true;
+  time.onMove = updateTimePill;
+
+  // Exact time of day as "7:44" + "AM"
+  function fmtTime(minOfDay) {
+    const m = Math.floor(minOfDay + 1e-6);
+    const h = Math.floor(m / 60) % 24, mm = m % 60;
+    return [hour12(h) + ":" + pad2(mm), ampm(h).toUpperCase()];
+  }
+
+  // The pill's own strip: large full hours only, moving exactly with the small ones and clipped by the pill
+  const pillEls = [];
+  for (let k = 0; k < 5; k++) {
+    const el = document.createElement("div");
+    el.className = "pt-item";
+    pillTrack.appendChild(el);
+    pillEls.push(el);
+  }
+  // Parallax: hours inside the pill are closer together than the white ones (43.5 px instead of 58),
+  // so this strip moves slower than the time strip while staying in sync with it
+  const PILL_HOUR = 43.5;
+  function updateTimePill(pos) {
+    const steps = Math.max(0, Math.min(time.count - 1, pos / time.step));
+    const hours = steps / 2;
+    const base = Math.floor(hours);
+    for (let k = 0; k < 5; k++) {
+      const el = pillEls[k], h = base - 2 + k;
+      const x = (h - hours) * PILL_HOUR;
+      if (h < 0 || Math.abs(x) > 70) { el.style.display = "none"; continue; }
+      el.style.display = "";
+      const hh = h % 24, text = hour12(hh) + ampm(hh);
+      if (el.dataset.t !== text) {
+        el.innerHTML = '<span class="p-num">' + hour12(hh) + '</span><span class="p-sub">' + ampm(hh) + "</span>";
+        el.dataset.t = text;
+      }
+      el.style.transform = "translate(calc(-50% + " + x.toFixed(2) + "px), -50%)";
+    }
+    const t = fmtTime((steps % 48) * 30);
+    timeStrip.setAttribute("aria-valuetext", t[0] + " " + t[1]);
+  }
 
   // ---------- Day: every day of the year ----------
-  const dayNum = document.getElementById("dayNum");
+  const dayTrack = document.getElementById("dayTrack");
   const dayStrip = document.getElementById("dayStrip");
   const day = new Carousel(dayStrip, 44, i => {
-    dayNum.textContent = String(DAY_OF_MONTH[i]);
     dayStrip.setAttribute("aria-valuetext", DAY_OF_MONTH[i] + " " + MONTHS_FULL[DAY_MONTH[i]]);
     if (!monthJump) wantedDom = DAY_OF_MONTH[i];
     if (!linking || day.following) return;
@@ -532,12 +594,12 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     month.followTo(DAY_MONTH[i]);
   });
   day.render(TOTAL_DAYS, i => '<span class="d-num">' + DAY_OF_MONTH[i] + "</span>");
+  day.onMove = pillStrip(dayTrack, day, i => '<span class="p-num">' + DAY_OF_MONTH[i] + "</span>");
 
   // ---------- Month ----------
-  const monthName = document.getElementById("monthName");
+  const monthTrack = document.getElementById("monthTrack");
   const monthStrip = document.getElementById("monthStrip");
   const month = new Carousel(monthStrip, 44, m => {
-    monthName.textContent = MONTHS[m];
     monthStrip.setAttribute("aria-valuetext", MONTHS_FULL[m] + " " + YEAR);
     if (!linking || month.following) return;
     // Same day number, or the month's last day if it is shorter; the days strip
@@ -549,6 +611,30 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     timeToDay(d);
   });
   month.render(12, i => '<span class="m-name">' + MONTHS[i] + "</span>");
+  month.onMove = pillStrip(monthTrack, month, i => '<span class="p-month">' + MONTHS[i] + "</span>");
+
+  // Inside a day or month pill: its own strip of large values that moves exactly with the small
+  // ones underneath; values slide in from one edge of the pill and out past the other
+  function pillStrip(trackEl, c, html) {
+    const els = [];
+    for (let k = 0; k < 3; k++) {
+      const el = document.createElement("div");
+      el.className = "pt-item";
+      trackEl.appendChild(el);
+      els.push(el);
+    }
+    return pos => {
+      const base = Math.round(pos / c.step);
+      for (let k = 0; k < 3; k++) {
+        const el = els[k], i = base - 1 + k;
+        const x = i * c.step - pos;
+        if (i < 0 || i >= c.count || Math.abs(x) > 60) { el.style.display = "none"; continue; }
+        el.style.display = "";
+        if (el.dataset.i !== String(i)) { el.innerHTML = html(i); el.dataset.i = String(i); }
+        el.style.transform = "translate(calc(-50% + " + x.toFixed(2) + "px), -50%)";
+      }
+    };
+  }
 
   // The time strip looks like an endless 24-hour loop: changing the date elsewhere
   // re-anchors it to the new day instantly, so the hours under the selection don't move
@@ -560,7 +646,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   // Magnet: whenever a strip comes to rest between two values, pull it under the selection
   setInterval(() => {
     [time, day, month].forEach(c => {
-      if (c.dragging || c.anim) return;
+      if (c.free || c.dragging || c.anim) return;
       if (Math.abs(c.pos - c.nearest() * c.step) > 0.5) c.animateTo(c.nearest());
     });
   }, 150);
@@ -587,16 +673,20 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   const edgeEl = document.getElementById("sunEdge");
   const holeEl = document.getElementById("maskHole");
   const dotHolesEl = document.getElementById("dotHoles");
-  // Pool of hour bubbles (one per full hour of the day)
+  // Pool of bubbles: one per full hour of the day, plus sunrise and sunset
   const labelsEl = document.getElementById("hourLabels");
   const labelEls = [];
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 26; i++) {
     const el = document.createElement("div");
     el.className = "hour-label";
     el.style.display = "none";
     labelsEl.appendChild(el);
     labelEls.push(el);
   }
+  const sunTimeEl = document.createElement("div");
+  sunTimeEl.className = "hour-label sun-time";
+  sunTimeEl.style.display = "none";
+  labelsEl.appendChild(sunTimeEl);
   const lookEl = document.getElementById("look");
 
   // Fallback location until the device shares its own: Belgrade
@@ -709,28 +799,72 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     return new Date(midnight + (steps - d * 48) * 30 * 60000);
   }
 
-  // Trajectory for the selected day, every 5 minutes, above the horizon only
-  let pathKey = "", pathPts = [], hourPts = [];
+  // Sun's declination and hour angle at a moment (same ephemeris as sunPosition)
+  function sunEquatorial(date, lon) {
+    const d = date.getTime() / 864e5 - 0.5 + 2440588 - 2451545;
+    const M = RAD * (357.5291 + 0.98560028 * d);
+    const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    const L = M + C + RAD * 102.9372 + Math.PI;
+    const e = RAD * 23.4397;
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+    const H = RAD * (280.16 + 360.9856235 * d) + RAD * lon - ra;
+    return { dec, H };
+  }
+
+  // Trajectory = the sun's daily circle for its declination at the selected moment.
+  // Hour angle advances 15° per hour, so 24 h close the circle: the path passes exactly through
+  // the sun and morphs continuously while the time strip moves — no jump at midnight, because
+  // 00:00 of the next day lands on the same spot as 24:00 of the previous one.
+  let pathKey = "", pathPts = [], hourPts = [], eventPts = [];
   function computePath() {
-    const base = sunDate();
-    const key = base.toDateString() + "|" + ar.lat.toFixed(4) + "|" + ar.lon.toFixed(4);
-    if (key === pathKey) return;
-    pathKey = key; pathPts = []; hourPts = [];
-    const y = base.getFullYear(), mo = base.getMonth(), da = base.getDate();
+    const t = sunDate();
+    const steps = Math.max(0, Math.min(time.count - 1, time.pos / time.step));
+    const minOfDay = (steps % 48) * 30;
+    const eq = sunEquatorial(t, ar.lon);
+    const phi = RAD * ar.lat;
+    const sP = Math.sin(phi), cP = Math.cos(phi), sD = Math.sin(eq.dec), cD = Math.cos(eq.dec), tD = Math.tan(eq.dec);
+    const at = min => {
+      const H = eq.H + (min - minOfDay) * 0.25 * RAD;
+      const alt = Math.asin(sP * sD + cP * cD * Math.cos(H));
+      const az = Math.atan2(Math.sin(H), Math.cos(H) * sP - tD * cP) + Math.PI;
+      return { alt, az };
+    };
+    pathPts = []; hourPts = []; eventPts = [];
+    let prev = null;
     for (let min = 0; min <= 1440; min += 5) {
-      const p = sunPosition(new Date(y, mo, da, 0, min), ar.lat, ar.lon);
+      const p = at(min);
       const up = p.alt > -0.83 * RAD;
+      // Sunrise or sunset between the previous sample and this one: find the exact minute
+      if (prev && prev.up !== up) {
+        let lo = min - 5, hi = min;
+        for (let k = 0; k < 14; k++) {
+          const mid = (lo + hi) / 2;
+          if ((at(mid).alt > -0.83 * RAD) === prev.up) lo = mid; else hi = mid;
+        }
+        const pe = at((lo + hi) / 2), v = toVec(pe);
+        pathPts.push({ v, up: true });
+        eventPts.push({ v, min: (lo + hi) / 2, label: fmtTime((lo + hi) / 2) });
+      }
       pathPts.push({ v: toVec(p), up });
+      prev = { up };
       // Every half hour gets a dot (also before sunrise and after sunset); full hours get a bubble
       if (min % 30 === 0 && min < 1440) {
         const h = min / 60;
-        hourPts.push({ v: toVec(p), up, h, label: min % 60 === 0 ? [pad2(hour12(h)), ampm(h)] : null });
+        hourPts.push({ v: toVec(p), up, h, min, label: min % 60 === 0 ? [String(hour12(h)), ampm(h).toUpperCase()] : null });
       }
+    }
+    // The dot closest to sunrise or sunset (whichever half hour it is) gets no hour bubble:
+    // the sunrise/sunset time bubble takes its place. If that dot is a half hour, nothing is hidden.
+    for (const e of eventPts) {
+      let near = null;
+      for (const hp of hourPts) if (!near || Math.abs(hp.min - e.min) < Math.abs(near.min - e.min)) near = hp;
+      if (near) near.label = null;
     }
   }
 
   // Does the drawn line pass through a bubble? (ignores the gap the line leaves around its own dot)
-  function rectHitsLine(rx, ry, w, h, dotX, dotY, segs, m = 8) {
+  function rectHitsLine(rx, ry, w, h, dotX, dotY, segs, m = 8, exclR = 7.5) {
     // m = minimum clearance between a bubble and the line
     const x0 = rx - m, y0 = ry - m, x1 = rx + w + m, y1 = ry + h + m;
     for (const s of segs) {
@@ -738,7 +872,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const n = Math.max(1, Math.ceil(Math.hypot(s[2] - s[0], s[3] - s[1]) / 2));
       for (let k = 0; k <= n; k++) {
         const px = s[0] + (s[2] - s[0]) * k / n, py = s[1] + (s[3] - s[1]) * k / n;
-        if (Math.hypot(px - dotX, py - dotY) < 7.5) continue;
+        if (Math.hypot(px - dotX, py - dotY) < exclR) continue;
         if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return true;
       }
     }
@@ -762,14 +896,17 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       return Math.abs(X - cx) > 6 * W || Math.abs(Y - cy) > 6 * H ? null : [X, Y];
     };
 
-    let d = "", pen = false, prev = null;
-    const segs = [];   // visible line segments, for keeping hour bubbles off the line
+    let d = "", pen = false, prevAll = null;
+    // Segments of the whole daily circle, including the part below the horizon that is not drawn:
+    // bubbles keep off this line everywhere, so night bubbles sit as if the trajectory were there
+    const segs = [];
     for (const p of pathPts) {
-      const q = p.up ? proj(p.v) : null;
-      if (!q) { pen = false; prev = null; continue; }
-      d += (pen ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
-      if (prev) segs.push([prev[0], prev[1], q[0], q[1]]);
-      prev = q;
+      const qa = proj(p.v);
+      if (!qa) { pen = false; prevAll = null; continue; }
+      if (prevAll) segs.push([prevAll[0], prevAll[1], qa[0], qa[1]]);
+      prevAll = qa;
+      if (!p.up) { pen = false; continue; }
+      d += (pen ? "L" : "M") + qa[0].toFixed(1) + " " + qa[1].toFixed(1);
       pen = true;
     }
     pathEl.setAttribute("d", d);
@@ -777,14 +914,26 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     // Half-hour dots; the line gets a gap around the ones on it (the line exists only above the horizon)
     let dots = "", holes = "";
     const bubbles = [];
+    // Yellow dots that would sit closer than 2 px (edge to edge) to a sunrise/sunset dot are dropped
+    const evQ = eventPts.map(ev => proj(ev.v)).filter(Boolean);
     for (const hp of hourPts) {
       const q = proj(hp.v);
       if (!q) continue;
+      if (evQ.some(e => Math.hypot(e[0] - q[0], e[1] - q[1]) < 2.5 + 2.5 + 2)) continue;
       const x = q[0].toFixed(1), y = q[1].toFixed(1);
       dots += '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#FFBB00"/>';
       if (hp.up) holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
       if (hp.label) bubbles[hp.h] = { q, label: hp.label };
     }
+    // Sunrise and sunset: white dot where the arc ends, with the exact time
+    eventPts.forEach((ev, k) => {
+      const q = proj(ev.v);
+      if (!q) return;
+      const x = q[0].toFixed(1), y = q[1].toFixed(1);
+      dots += '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#FFFFFF"/>';
+      holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
+      if (k < 2) bubbles[24 + k] = { q, label: ev.label };
+    });
     dotsEl.innerHTML = dots;
     dotHolesEl.innerHTML = holes;
 
@@ -800,6 +949,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     sunEl.setAttribute("visibility", onScreen ? "visible" : "hidden");
 
     // Hour bubbles: each hour always uses its own element, so its chosen side is remembered per hour
+    const shownRects = [];
     for (let i = 0; i < labelEls.length; i++) {
       const el = labelEls[i], b = bubbles[i];
       if (!b || b.q[0] < -80 || b.q[0] > W + 10 || b.q[1] < -40 || b.q[1] > H + 10) {
@@ -857,18 +1007,53 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
         covered = Math.hypot(sq[0] - nx, sq[1] - ny) < 32.5;
       }
       el.classList.toggle("is-covered", covered);
+      if (!covered) shownRects.push({ el, x: lx, y: ly, w: el._w, h: el._h });
     }
 
-    // Sun out of view: arrow at the screen edge pointing toward it
+    // Exact selected time next to the sun: below-right by default (as in the mockup); otherwise
+    // above-right, below-left, above-left — never on top of an hour bubble, and off the line if possible
+    if (onScreen) {
+      const t = fmtTime(((Math.max(0, time.pos / time.step)) % 48) * 30);
+      const text = t[0] + " " + t[1];
+      if (sunTimeEl.style.display === "none") sunTimeEl.style.display = "";
+      if (sunTimeEl.dataset.t !== text) {
+        sunTimeEl.innerHTML = "<span>" + t[0] + "</span><span>" + t[1] + "</span>";
+        sunTimeEl.dataset.t = text;
+        sunTimeEl._w = sunTimeEl.offsetWidth; sunTimeEl._h = sunTimeEl.offsetHeight;
+      }
+      const w = sunTimeEl._w, h = sunTimeEl._h, sx = sq[0], sy = sq[1];
+      const spots = [[sx + 28.5, sy + 30.5], [sx + 28.5, sy - 30.5 - h], [sx - 28.5 - w, sy + 30.5], [sx - 28.5 - w, sy - 30.5 - h]];
+      const hitsBubble = s => shownRects.some(r => spots[s][0] < r.x + r.w + 4 && spots[s][0] + w > r.x - 4 && spots[s][1] < r.y + r.h + 4 && spots[s][1] + h > r.y - 4);
+      const hitsLine = s => rectHitsLine(spots[s][0], spots[s][1], w, h, sx, sy, segs, 4, 37.5);
+      const ok = s => !hitsBubble(s) && !hitsLine(s);
+      let pick = -1;
+      if (sunTimeEl._spot != null && ok(sunTimeEl._spot)) pick = sunTimeEl._spot;
+      if (pick < 0) for (let s = 0; s < 4; s++) if (ok(s)) { pick = s; break; }
+      if (pick < 0) for (let s = 0; s < 4; s++) if (!hitsBubble(s)) { pick = s; break; }
+      if (pick < 0) pick = sunTimeEl._spot != null ? sunTimeEl._spot : 0;
+      sunTimeEl._spot = pick;
+      const lx = spots[pick][0], ly = spots[pick][1];
+      sunTimeEl.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
+      // If no spot was free of hour bubbles, the hour bubbles underneath step aside
+      for (const r of shownRects) {
+        if (lx < r.x + r.w + 4 && lx + w > r.x - 4 && ly < r.y + r.h + 4 && ly + h > r.y - 4) r.el.classList.add("is-covered");
+      }
+    } else if (sunTimeEl.style.display !== "none") {
+      sunTimeEl.style.display = "none";
+    }
+
+    // Sun out of view: a small sun at the edge of the screen, on the side toward the real one
+    // (left or right of the calendar panel, or below it)
     if (!onScreen) {
       const r = raw(sv);
-      const ang = Math.atan2(-r[1], r[0]);
-      const ux = Math.cos(ang), uy = Math.sin(ang);
-      const m = 30, top = m + 50, bottom = H - 250;
+      let ux = r[0], uy = -r[1];
+      const l = Math.hypot(ux, uy);
+      if (l < 1e-6) { ux = 0; uy = 1; } else { ux /= l; uy /= l; }
+      const m = 10;
       const tx = Math.abs(ux) > 1e-6 ? ((ux > 0 ? W - m : m) - cx) / ux : Infinity;
-      const ty = Math.abs(uy) > 1e-6 ? ((uy > 0 ? bottom : top) - cy) / uy : Infinity;
+      const ty = Math.abs(uy) > 1e-6 ? ((uy > 0 ? H - m : m) - cy) / uy : Infinity;
       const t = Math.min(tx, ty);
-      edgeEl.setAttribute("transform", "translate(" + (cx + ux * t).toFixed(1) + " " + (cy + uy * t).toFixed(1) + ") rotate(" + (ang / RAD).toFixed(1) + ")");
+      edgeEl.setAttribute("transform", "translate(" + (cx + ux * t).toFixed(1) + " " + (cy + uy * t).toFixed(1) + ")");
       edgeEl.setAttribute("visibility", "visible");
     } else {
       edgeEl.setAttribute("visibility", "hidden");
