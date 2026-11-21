@@ -79,6 +79,8 @@
     will-change: transform;
     transition: opacity .15s ease;
   }
+  /* Bubbles along the arc fade continuously with the sun's distance, so no lag there */
+  .hour-label:not(.sun-time) { transition: none; }
   .hour-label.is-covered, .hour-label.is-moving { opacity: 0; }
   /* Exact selected time next to the sun */
   .hour-label.sun-time { background: #FFBB00; color: #000; }
@@ -264,7 +266,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
 </script>
 <script>
 (function () {
-  const YEAR = 2026;
+  const YEAR = new Date().getFullYear();   // the calendar covers the current year
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const MONTHS_FULL = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
   const DOT_SVG = '<svg class="t-dot" viewBox="0 0 3 2" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0 0.984375C0 0.703125 0.0849609 0.46875 0.254883 0.28125C0.424805 0.09375 0.676758 0 1.01074 0C1.33887 0 1.58789 0.09375 1.75781 0.28125C1.93359 0.46875 2.02148 0.703125 2.02148 0.984375C2.02148 1.25977 1.93359 1.49121 1.75781 1.67871C1.58789 1.86035 1.33887 1.95117 1.01074 1.95117C0.676758 1.95117 0.424805 1.86035 0.254883 1.67871C0.0849609 1.49121 0 1.25977 0 0.984375Z" fill="#DDDDDD"/></svg>';
@@ -688,11 +690,15 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   }, 150);
 
   // ---------- Initial state from the mockup: 07 am, 19 Feb 2026 ----------
+  // Start on today and the current time (the time strip scrolls freely, so it lands on the exact minute)
   function init() {
-    const d = MONTH_START[1] + 18;    // 19 Feb
-    month.goTo(1, false);
+    const now = new Date();
+    const d = MONTH_START[now.getMonth()] + now.getDate() - 1;
+    const minOfDay = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+    month.goTo(now.getMonth(), false);
     day.goTo(d, false);
-    time.goTo(d * 48 + 14, false);    // 07:00
+    time.stop();
+    time.setPos((d * 48 + minOfDay / 30) * time.step);
   }
 
   // ---------- AR: camera, location, orientation ----------
@@ -1020,14 +1026,18 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const reach = 8 + Math.abs(nx) * w / 2 + Math.abs(ny) * h / 2;
       const lx = dx + nx * reach - w / 2, ly = dy + ny * reach - h / 2;
       el.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
-      let covered = false;
+      // Fade as the sun approaches: fully visible while the sun's disc is 36 pt or more away,
+      // fully gone at 8 pt, linear in between (distance from the white disc's edge to the bubble)
+      let fade = 1;
       if (onScreen) {
         const nx = Math.max(lx, Math.min(sq[0], lx + el._w));
         const ny = Math.max(ly, Math.min(sq[1], ly + el._h));
-        covered = Math.hypot(sq[0] - nx, sq[1] - ny) < 32.5;
+        const gapToSun = Math.hypot(sq[0] - nx, sq[1] - ny) - 18.5;
+        fade = Math.max(0, Math.min(1, (gapToSun - 8) / (36 - 8)));
       }
-      el.classList.toggle("is-covered", covered);
-      if (!covered) shownRects.push({ el, x: lx, y: ly, w: el._w, h: el._h });
+      el.classList.remove("is-covered");
+      el.style.opacity = fade.toFixed(3);
+      if (fade > 0) shownRects.push({ el, x: lx, y: ly, w: el._w, h: el._h });
     }
 
     // Exact selected time next to the sun: below-right by default (as in the mockup); otherwise
@@ -1056,7 +1066,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       sunTimeEl.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
       // If no spot was free of hour bubbles, the hour bubbles underneath step aside
       for (const r of shownRects) {
-        if (lx < r.x + r.w + 4 && lx + w > r.x - 4 && ly < r.y + r.h + 4 && ly + h > r.y - 4) r.el.classList.add("is-covered");
+        if (lx < r.x + r.w + 4 && lx + w > r.x - 4 && ly < r.y + r.h + 4 && ly + h > r.y - 4) r.el.style.opacity = "0";
       }
     } else if (sunTimeEl.style.display !== "none") {
       sunTimeEl.style.display = "none";
