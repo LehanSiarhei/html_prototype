@@ -63,7 +63,7 @@
     overflow: visible;
   }
   /* Drag on the sky: look around (no sensors) or fine-tune the compass (with sensors) */
-  .look { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+  .look { position: absolute; inset: 0; touch-action: none; cursor: default; }
   /* Hour bubbles next to the trajectory dots */
   .hour-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   .hour-label {
@@ -226,6 +226,11 @@
   #dockDay { left: 0; width: 60px; }
   #dockMonth { left: 62px; width: 60px; }
   #dockTime { left: 124px; width: 78px; }
+  /* Invisible touch areas: each button also reacts 65 pt above and below it (190 pt tall in total) */
+  .dock-hit { position: absolute; top: -65px; height: 190px; z-index: 4; touch-action: none; cursor: ns-resize; }
+  #dockDayHit { left: 0; width: 60px; }
+  #dockMonthHit { left: 62px; width: 60px; }
+  #dockTimeHit { left: 124px; width: 78px; }
   .dock-track { position: absolute; inset: 0; pointer-events: none; }
   .dock-track .pt-item { flex-direction: row; align-items: baseline; gap: 2px; }
   .vpanel {
@@ -310,6 +315,9 @@
       <button class="dock-btn" id="dockDay" type="button" role="slider" aria-label="Число — нажмите и ведите вверх или вниз"><span class="dock-track"></span></button>
       <button class="dock-btn" id="dockMonth" type="button" role="slider" aria-label="Месяц — нажмите и ведите вверх или вниз"><span class="dock-track"></span></button>
       <button class="dock-btn" id="dockTime" type="button" role="slider" aria-label="Время — нажмите и ведите вверх или вниз"><span class="dock-track"></span></button>
+      <div class="dock-hit" id="dockDayHit" aria-hidden="true"></div>
+      <div class="dock-hit" id="dockMonthHit" aria-hidden="true"></div>
+      <div class="dock-hit" id="dockTimeHit" aria-hidden="true"></div>
     </div>
   </main>
 
@@ -777,6 +785,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   ];
   for (const d of DOCK) {
     d.btn = document.getElementById(d.id);
+    d.hit = document.getElementById(d.id + "Hit");
     d.panel = document.getElementById(d.id + "Panel");
     d.track = d.btn.querySelector(".dock-track");
     d.pool = [];
@@ -795,16 +804,16 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     }
     const c = d.c;
     let active = false, startY = 0;
-    d.btn.addEventListener("pointerdown", e => {
+    d.hit.addEventListener("pointerdown", e => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       e.preventDefault();
       active = true;
       c.stop(); c.following = false; c.dragging = true;
       startY = e.clientY; c.startPos = c.pos;
-      d.btn.setPointerCapture(e.pointerId);
+      d.hit.setPointerCapture(e.pointerId);
       d.panel.classList.add("is-open");
     });
-    d.btn.addEventListener("pointermove", e => {
+    d.hit.addEventListener("pointermove", e => {
       if (!active) return;
       // Finger up moves the list up, bringing later values under the button
       c.setPos(c.rubber(c.startPos - (e.clientY - startY) * (c.step / d.vs)));
@@ -817,10 +826,10 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       if (c.free) { if (c.pos < 0 || c.pos > c.max()) c.glideTo(c.pos); }
       else c.animateTo(c.nearest());
     };
-    d.btn.addEventListener("pointerup", end);
-    d.btn.addEventListener("pointercancel", end);
-    d.btn.addEventListener("lostpointercapture", end);
-    d.btn.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
+    d.hit.addEventListener("pointerup", end);
+    d.hit.addEventListener("pointercancel", end);
+    d.hit.addEventListener("lostpointercapture", end);
+    d.hit.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
     d.btn.addEventListener("keydown", e => {
       if (e.key === "ArrowUp" || e.key === "ArrowRight") { c.following = false; c.animateTo(c.nearest() + 1); e.preventDefault(); }
       if (e.key === "ArrowDown" || e.key === "ArrowLeft") { c.following = false; c.animateTo(c.nearest() - 1); e.preventDefault(); }
@@ -989,7 +998,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       ar.sensors = true;
       const d = ar.decl / RAD;
       const declText = (d >= 0 ? "+" : "−") + Math.abs(d).toFixed(1).replace(".", ",") + "°";
-      showStatus("Компас переведён на географический север (магнитное склонение " + declText + "). Если траектория всё же смещена, сдвиньте небо пальцем", 7000);
+      showStatus("Компас переведён на географический север (магнитное склонение " + declText + ")", 5000);
     }
   }
   function currentMatrix() {
@@ -1258,7 +1267,9 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
 
   // Drag the sky: look around without sensors, or correct the compass with them
   let lookDrag = null;
-  lookEl.addEventListener("pointerdown", e => { lookDrag = { x: e.clientX, y: e.clientY }; lookEl.setPointerCapture(e.pointerId); });
+  // Prototype 2: the sky can't be dragged — no manual look-around and no compass nudge by finger.
+  // The layer still takes touches so the page itself doesn't scroll or zoom.
+  lookEl.addEventListener("pointerdown", e => { e.preventDefault(); });
   lookEl.addEventListener("pointermove", e => {
     if (!lookDrag) return;
     const dx = e.clientX - lookDrag.x, dy = e.clientY - lookDrag.y;
@@ -1314,7 +1325,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const parts = [];
       if (missing.length) parts.push("Нет доступа к " + missing.join(", ") + ".");
       if (!pos) parts.push("Траектория показана для Белграда.");
-      if (!ar.sensors) parts.push("Перетаскивайте небо, чтобы осмотреться.");
+      if (!ar.sensors) parts.push("Датчики движения недоступны.");
       if (parts.length) showStatus(parts.join(" "), 8000);
     }, 1200);
   }
