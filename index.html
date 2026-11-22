@@ -79,8 +79,8 @@
     will-change: transform;
     transition: opacity .15s ease;
   }
-  /* Bubbles along the arc fade continuously with the sun's distance, so no lag there */
-  .hour-label:not(.sun-time) { transition: none; }
+  /* Bubbles along the arc: hide and show near the sun with a 0.2 s fade */
+  .hour-label:not(.sun-time) { transition: opacity .2s ease; }
   .hour-label.is-covered, .hour-label.is-moving { opacity: 0; }
   /* Exact selected time next to the sun */
   .hour-label.sun-time { background: #FFBB00; color: #000; }
@@ -123,7 +123,7 @@
   /* Calendar block */
   .picker {
     position: absolute;
-    left: 20px; right: 20px;
+    left: 50%; width: 237px; margin-left: -118.5px;
     bottom: 65px;
     height: 176px;
     border-radius: 26px;
@@ -231,12 +231,12 @@
       <path id="sunPath" mask="url(#pathMask)" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round"/>
       <g id="hourDots"></g>
       <g id="sunMark" visibility="hidden">
-        <circle r="32.5" fill="#FFBB00" filter="url(#sunGlow)"/>
-        <circle r="18.5" fill="#FFFFFF"/>
+        <circle r="32.5" fill="#FFFFFF" filter="url(#sunGlow)"/>
+        <circle r="18.5" fill="#FFBB00"/>
       </g>
       <g id="sunEdge" visibility="hidden">
-        <circle r="6.27" fill="#FFBB00" filter="url(#miniGlow)"/>
-        <circle r="3.57" fill="#FFFFFF"/>
+        <circle r="6.27" fill="#FFFFFF" filter="url(#miniGlow)"/>
+        <circle r="3.57" fill="#FFBB00"/>
       </g>
     </svg>
     <div class="hour-labels" id="hourLabels" aria-hidden="true"></div>
@@ -1026,14 +1026,14 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const reach = 8 + Math.abs(nx) * w / 2 + Math.abs(ny) * h / 2;
       const lx = dx + nx * reach - w / 2, ly = dy + ny * reach - h / 2;
       el.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
-      // Fade as the sun approaches: fully visible while the sun's disc is 36 pt or more away,
-      // fully gone at 8 pt, linear in between (distance from the white disc's edge to the bubble)
+      // Hide when the sun's disc comes within 20 pt of the bubble, show again when it moves further
+      // away; the switch fades over 0.2 s (distance from the white disc's edge to the bubble)
       let fade = 1;
       if (onScreen) {
         const nx = Math.max(lx, Math.min(sq[0], lx + el._w));
         const ny = Math.max(ly, Math.min(sq[1], ly + el._h));
         const gapToSun = Math.hypot(sq[0] - nx, sq[1] - ny) - 18.5;
-        fade = Math.max(0, Math.min(1, (gapToSun - 8) / (36 - 8)));
+        fade = gapToSun > 20 ? 1 : 0;
       }
       el.classList.remove("is-covered");
       el.style.opacity = fade.toFixed(3);

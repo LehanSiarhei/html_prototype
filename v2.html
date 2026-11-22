@@ -79,8 +79,8 @@
     will-change: transform;
     transition: opacity .15s ease;
   }
-  /* Bubbles along the arc fade continuously with the sun's distance, so no lag there */
-  .hour-label:not(.sun-time) { transition: none; }
+  /* Bubbles along the arc: hide and show near the sun with a 0.2 s fade */
+  .hour-label:not(.sun-time) { transition: opacity .2s ease; }
   .hour-label.is-covered, .hour-label.is-moving { opacity: 0; }
   /* Exact selected time next to the sun */
   .hour-label.sun-time { background: #FFBB00; color: #000; }
@@ -211,25 +211,25 @@
   /* The original three strips stay as an invisible model: same linking, sun and trajectory logic */
   .picker { visibility: hidden; pointer-events: none; }
   .dock {
-    position: absolute; right: 30px;
-    bottom: calc(164px + env(safe-area-inset-bottom, 0px));
-    width: 156px; height: 46px; z-index: 3;
+    position: absolute; left: 50%; margin-left: -101px;
+    bottom: calc(151px + env(safe-area-inset-bottom, 0px));
+    width: 202px; height: 60px; z-index: 3;
   }
-  @media (min-width: 501px) { .dock { bottom: 164px; } }
+  @media (min-width: 501px) { .dock { bottom: 151px; } }
   .dock-btn {
-    position: absolute; top: 0; height: 46px; padding: 0; border: 0;
+    position: absolute; top: 0; height: 60px; padding: 0; border: 0;
     border-radius: 66px; background: var(--accent); color: #000;
     overflow: hidden; touch-action: none; cursor: ns-resize; z-index: 2;
     font-family: inherit; -webkit-tap-highlight-color: transparent;
   }
   .dock-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-  #dockDay { left: 0; width: 46px; }
-  #dockMonth { left: 48px; width: 46px; }
-  #dockTime { left: 96px; width: 60px; }
+  #dockDay { left: 0; width: 60px; }
+  #dockMonth { left: 62px; width: 60px; }
+  #dockTime { left: 124px; width: 78px; }
   .dock-track { position: absolute; inset: 0; pointer-events: none; }
   .dock-track .pt-item { flex-direction: row; align-items: baseline; gap: 2px; }
   .vpanel {
-    position: absolute; top: -140px; height: 289px;
+    position: absolute; top: -141px; height: 289px;
     border-radius: 26px; overflow: hidden;
     background: rgba(34, 35, 38, 0.84);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
@@ -237,13 +237,13 @@
     pointer-events: none; z-index: 1;
   }
   .vpanel.is-open { opacity: 1; }
-  #dockDayPanel { left: 0; width: 46px; }
-  #dockMonthPanel { left: 48px; width: 46px; }
-  #dockTimePanel { left: 96px; width: 60px; }
+  #dockDayPanel { left: 0; width: 60px; }
+  #dockMonthPanel { left: 62px; width: 60px; }
+  #dockTimePanel { left: 124px; width: 78px; }
   .vl-item {
     position: absolute; left: 0; right: 0; top: 0;
     display: flex; align-items: center; justify-content: center; gap: 5px;
-    color: #fff; font-weight: 500; line-height: 18px; white-space: nowrap;
+    color: #dddddd; font-weight: 500; line-height: 18px; white-space: nowrap;
     will-change: transform;
   }
   .vl-h, .vl-num { font-size: 18px; }
@@ -759,17 +759,17 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   // Each yellow button drives one of the (hidden) model strips: while the finger is down a vertical
   // list opens and follows the finger; on release the list disappears. Day and month then snap to the
   // nearest value; time stays exactly where it was left (it never snaps).
-  const PANEL_CENTER = 140 + 23;   // the button's centre, measured from the top of its list
+  const PANEL_CENTER = 141 + 30;   // the button's centre, measured from the top of its list
   const DOCK = [
-    { c: day, id: "dockDay", vs: 32, big: 32,
+    { c: day, id: "dockDay", vs: 32, big: 50,
       list: i => '<span class="vl-num">' + DAY_OF_MONTH[i] + "</span>",
       bigHtml: i => '<span class="p-num">' + DAY_OF_MONTH[i] + "</span>" },
-    { c: month, id: "dockMonth", vs: 32, big: 32,
+    { c: month, id: "dockMonth", vs: 32, big: 50,
       list: i => '<span class="vl-month">' + MONTHS[i] + "</span>",
       bigHtml: i => '<span class="p-month">' + MONTHS[i] + "</span>" },
-    { c: time, id: "dockTime", vs: 18, big: 32, hours: true,
+    { c: time, id: "dockTime", vs: 16.5, big: 32, hours: true,
       list: i => {
-        if (i % 2) return '<span class="vl-dot"></span>';
+        if (i % 2) return "";   // full hours only, 33 pt apart (as in the mockup)
         const h = (i % 48) / 2;
         return '<span class="vl-h">' + hour12(h) + '</span><span class="vl-s">' + ampm(h) + "</span>";
       },
@@ -844,7 +844,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
         const base = Math.round(steps);
         d.bigPool.forEach((el, k) => {
           const i = base - 1 + k, y = (i - steps) * d.big;
-          if (i < 0 || i >= c.count || Math.abs(y) > 50) { el.style.display = "none"; return; }
+          if (i < 0 || i >= c.count || Math.abs(y) > 70) { el.style.display = "none"; return; }
           el.style.display = "";
           if (el.dataset.i !== String(i)) { el.innerHTML = d.bigHtml(i); el.dataset.i = String(i); }
           el.style.transform = "translate(-50%, calc(-50% + " + y.toFixed(2) + "px))";
@@ -1191,14 +1191,14 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const reach = 8 + Math.abs(nx) * w / 2 + Math.abs(ny) * h / 2;
       const lx = dx + nx * reach - w / 2, ly = dy + ny * reach - h / 2;
       el.style.transform = "translate(" + lx.toFixed(1) + "px," + ly.toFixed(1) + "px)";
-      // Fade as the sun approaches: fully visible while the sun's disc is 36 pt or more away,
-      // fully gone at 8 pt, linear in between (distance from the white disc's edge to the bubble)
+      // Hide when the sun's disc comes within 20 pt of the bubble, show again when it moves further
+      // away; the switch fades over 0.2 s (distance from the white disc's edge to the bubble)
       let fade = 1;
       if (onScreen) {
         const nx = Math.max(lx, Math.min(sq[0], lx + el._w));
         const ny = Math.max(ly, Math.min(sq[1], ly + el._h));
         const gapToSun = Math.hypot(sq[0] - nx, sq[1] - ny) - 18.5;
-        fade = Math.max(0, Math.min(1, (gapToSun - 8) / (36 - 8)));
+        fade = gapToSun > 20 ? 1 : 0;
       }
       el.classList.remove("is-covered");
       el.style.opacity = fade.toFixed(3);
