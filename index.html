@@ -626,16 +626,18 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   month.render(12, i => '<span class="m-name">' + MONTHS[i] + "</span>");
   month.onMove = pillStrip(monthTrack, month, i => '<span class="p-month">' + MONTHS[i] + "</span>", 68);
 
-  // The current moment is marked in yellow on each strip on its own, as in the mockup: the nearest
-  // hour on every day (8:22 → 8 am, 8:30 → 9 am), today's day number in every month, and this month
+  // The current moment is marked in yellow: the nearest hour of today only (8:22 → 8 am,
+  // 8:30 → 9 am), today's date only, and this month
   function nowIndices() {
     const now = new Date();
-    const h = Math.floor((now.getHours() * 60 + now.getMinutes() + 30) / 60) % 24;
-    return { t: h * 2, d: now.getDate(), m: now.getMonth() };
+    if (now.getFullYear() !== YEAR) return { t: -1, d: -1, m: -1 };
+    const d = MONTH_START[now.getMonth()] + now.getDate() - 1;
+    const h = Math.floor((now.getHours() * 60 + now.getMinutes() + 30) / 60);
+    return { t: d * 48 + h * 2, d, m: now.getMonth() };
   }
   let NOW = nowIndices();
-  time.isNow = i => i % 48 === NOW.t;
-  day.isNow = i => DAY_OF_MONTH[i] === NOW.d;
+  time.isNow = i => i === NOW.t;
+  day.isNow = i => i === NOW.d;
   month.isNow = i => i === NOW.m;
   function repaintStrips() { for (const c of [time, day, month]) { c.range = [-1, -1]; c.track.innerHTML = ""; c.paint(); } }
   repaintStrips();
