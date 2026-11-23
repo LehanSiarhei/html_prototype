@@ -123,11 +123,11 @@
   /* Calendar block */
   .picker {
     position: absolute;
-    left: 50%; width: 297px; margin-left: -148.5px;
+    left: 50%; width: 305px; margin-left: -152.5px;
     bottom: 65px;
-    height: 176px;
+    height: 177px;
     border-radius: 26px;
-    background: var(--panel-bg);
+    background: rgba(34, 35, 38, 0.8);
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
     overflow: hidden;
@@ -140,9 +140,14 @@
   .row {
     position: absolute; left: 0; right: 0;
   }
-  .row--time  { top: 10px;  height: 60px; }
-  .row--day   { top: 72px;  height: 46px; }
-  .row--month { top: 120px; height: 46px; }
+  .row--time  { top: 11px;  height: 60px; }
+  .row--day   { top: 73px;  height: 46px; }
+  .row--month { top: 121px; height: 46px; }
+  /* Text sits slightly above the centre of each pill, as in the mockup (Barlow's normal line height) */
+  .row--time .strip, .row--time .pill-track { top: -3px; bottom: 3px; }
+  .row--day .strip, .row--day .pill-track { top: -1px; bottom: 1px; }
+  .row--month .strip { top: -2px; bottom: 2px; }
+  .row--month .pill-track { top: -1.5px; bottom: 1.5px; }
 
   .strip {
     position: absolute; inset: 0;
@@ -168,14 +173,17 @@
     text-align: center;
     white-space: nowrap;
   }
-  .row--time  .item { width: 29px; height: 100%; }
-  .row--day   .item, .row--month .item { width: 44px; height: 100%; }
+  .row--time  .item { width: 21.8px; height: 100%; }
+  .row--day   .item { width: 44px; height: 100%; }
+  .row--month .item { width: 50px; height: 100%; }
+  /* Current hour (rounded to the nearest), today and this month */
+  .item.is-now { color: var(--accent); }
 
-  .t-num  { font-size: 18px; line-height: 18px; margin-bottom: -4px; }
-  .t-sub  { font-size: 12px; line-height: 18px; }
+  .t-num  { font-size: 18px; line-height: normal; }
+  .t-sub  { font-size: 12px; line-height: normal; }
   .t-dot  { width: 2.021px; height: 1.951px; display: block; }
   .d-num  { font-size: 18px; line-height: normal; }
-  .m-name { font-size: 16px; font-weight: 600; line-height: normal; }
+  .m-name { font-size: 18px; font-weight: 500; line-height: normal; }
 
   /* Red selection stays fixed; the strip scrolls underneath it */
   .pill {
@@ -199,9 +207,11 @@
     color: #000; font-weight: 500; white-space: nowrap;
     will-change: transform;
   }
-  .p-num   { font-size: 28px; line-height: 18px; }
-  .p-sub   { font-size: 16px; line-height: 18px; }
-  .p-month { font-size: 24px; line-height: normal; letter-spacing: -0.96px; }
+  .p-num   { font-size: 28px; line-height: normal; }
+  .p-sub   { font-size: 16px; line-height: normal; }
+  .p-month { font-size: 24px; line-height: normal; letter-spacing: -0.48px; }
+  .pill--time .pt-item { gap: 0; }
+  .pill--time .p-num { margin-bottom: -7px; }
 
   @media (prefers-reduced-motion: reduce) {
     .strip { scroll-behavior: auto; }
@@ -235,8 +245,8 @@
         <circle r="18.5" fill="#FFBB00"/>
       </g>
       <g id="sunEdge" visibility="hidden">
-        <circle r="6.27" fill="#FFFFFF" filter="url(#miniGlow)"/>
-        <circle r="3.57" fill="#FFBB00"/>
+        <circle r="9.4" fill="#FFFFFF" filter="url(#miniGlow)"/>
+        <circle r="4.5" fill="#FFBB00"/>
       </g>
     </svg>
     <div class="hour-labels" id="hourLabels" aria-hidden="true"></div>
@@ -391,6 +401,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       if (i >= a && i <= b && a !== -1) continue;
       const el = document.createElement("div");
       el.className = "item";
+      if (this.isNow && this.isNow(i)) el.classList.add("is-now");
       el.dataset.i = i;
       el.style.left = (this.side + i * this.step) + "px";
       el.innerHTML = this.html(i);
@@ -533,7 +544,8 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   // ---------- Time: every half hour of the year (scrolls freely, no snapping) ----------
   const timeStrip = document.getElementById("timeStrip");
   const pillTrack = document.getElementById("pillTrack");
-  const time = new Carousel(timeStrip, 29, i => {
+  // White hours are 43.6 px apart (32 px block + 4.8 + 2 px dot + 4.8): 21.8 px per half hour
+  const time = new Carousel(timeStrip, 21.8, i => {
     if (!linking || time.following) return;
     const d = Math.floor(i / 48);   // crossing midnight changes the day,
     day.followTo(d);
@@ -562,9 +574,8 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     pillTrack.appendChild(el);
     pillEls.push(el);
   }
-  // Parallax: hours inside the pill are closer together than the white ones (43.5 px instead of 58),
-  // so this strip moves slower than the time strip while staying in sync with it
-  const PILL_HOUR = 43.5;
+  // Hours inside the pill are 52 px apart, the white ones 43.6 px (each strip in sync with the other)
+  const PILL_HOUR = 52;
   function updateTimePill(pos) {
     const steps = Math.max(0, Math.min(time.count - 1, pos / time.step));
     const hours = steps / 2;
@@ -596,12 +607,12 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     month.followTo(DAY_MONTH[i]);
   });
   day.render(TOTAL_DAYS, i => '<span class="d-num">' + DAY_OF_MONTH[i] + "</span>");
-  day.onMove = pillStrip(dayTrack, day, i => '<span class="p-num">' + DAY_OF_MONTH[i] + "</span>");
+  day.onMove = pillStrip(dayTrack, day, i => '<span class="p-num">' + DAY_OF_MONTH[i] + "</span>", 56);
 
   // ---------- Month ----------
   const monthTrack = document.getElementById("monthTrack");
   const monthStrip = document.getElementById("monthStrip");
-  const month = new Carousel(monthStrip, 44, m => {
+  const month = new Carousel(monthStrip, 50, m => {
     monthStrip.setAttribute("aria-valuetext", MONTHS_FULL[m] + " " + YEAR);
     if (!linking || month.following) return;
     // Same day number, or the month's last day if it is shorter; the days strip
@@ -613,11 +624,31 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     timeToDay(d);
   });
   month.render(12, i => '<span class="m-name">' + MONTHS[i] + "</span>");
-  month.onMove = pillStrip(monthTrack, month, i => '<span class="p-month">' + MONTHS[i] + "</span>");
+  month.onMove = pillStrip(monthTrack, month, i => '<span class="p-month">' + MONTHS[i] + "</span>", 68);
 
-  // Inside a day or month pill: its own strip of large values that moves exactly with the small
-  // ones underneath; values slide in from one edge of the pill and out past the other
-  function pillStrip(trackEl, c, html) {
+  // The current moment is marked in yellow on each strip on its own, as in the mockup: the nearest
+  // hour on every day (8:22 → 8 am, 8:30 → 9 am), today's day number in every month, and this month
+  function nowIndices() {
+    const now = new Date();
+    const h = Math.floor((now.getHours() * 60 + now.getMinutes() + 30) / 60) % 24;
+    return { t: h * 2, d: now.getDate(), m: now.getMonth() };
+  }
+  let NOW = nowIndices();
+  time.isNow = i => i % 48 === NOW.t;
+  day.isNow = i => DAY_OF_MONTH[i] === NOW.d;
+  month.isNow = i => i === NOW.m;
+  function repaintStrips() { for (const c of [time, day, month]) { c.range = [-1, -1]; c.track.innerHTML = ""; c.paint(); } }
+  repaintStrips();
+  setInterval(() => {
+    const n = nowIndices();
+    if (n.t === NOW.t && n.d === NOW.d && n.m === NOW.m) return;
+    NOW = n;
+    repaintStrips();
+  }, 30000);
+
+  // Inside a day or month pill: its own strip of large values that moves with the small ones
+  // underneath (closer together, so slightly slower); values slide in and out past the pill's edges
+  function pillStrip(trackEl, c, html, gap) {
     const els = [];
     for (let k = 0; k < 3; k++) {
       const el = document.createElement("div");
@@ -629,8 +660,8 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       const base = Math.round(pos / c.step);
       for (let k = 0; k < 3; k++) {
         const el = els[k], i = base - 1 + k;
-        const x = i * c.step - pos;
-        if (i < 0 || i >= c.count || Math.abs(x) > 60) { el.style.display = "none"; continue; }
+        const x = (i - pos / c.step) * gap;
+        if (i < 0 || i >= c.count || Math.abs(x) > 90) { el.style.display = "none"; continue; }
         el.style.display = "";
         if (el.dataset.i !== String(i)) { el.innerHTML = html(i); el.dataset.i = String(i); }
         el.style.transform = "translate(calc(-50% + " + x.toFixed(2) + "px), -50%)";
@@ -1079,7 +1110,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
       let ux = r[0], uy = -r[1];
       const l = Math.hypot(ux, uy);
       if (l < 1e-6) { ux = 0; uy = 1; } else { ux /= l; uy /= l; }
-      const m = 10;
+      const m = 14;
       const tx = Math.abs(ux) > 1e-6 ? ((ux > 0 ? W - m : m) - cx) / ux : Infinity;
       const ty = Math.abs(uy) > 1e-6 ? ((uy > 0 ? H - m : m) - cy) / uy : Infinity;
       const t = Math.min(tx, ty);
