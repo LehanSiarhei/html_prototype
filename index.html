@@ -173,7 +173,7 @@
     text-align: center;
     white-space: nowrap;
   }
-  .row--time  .item { width: 21.8px; height: 100%; }
+  .row--time  .item { width: 20.9px; height: 100%; }
   .row--day   .item { width: 44px; height: 100%; }
   .row--month .item { width: 50px; height: 100%; }
   /* Current hour (rounded to the nearest), today and this month */
@@ -330,7 +330,18 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
         // Tap: bring the tapped value under the selection
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const item = hit && hit.closest(".item");
-        if (item && strip.contains(item)) self.animateTo(Number(item.dataset.i));
+        if (self.hourTap) {
+          // Time strip: each full hour owns the whole stretch from the dot before it to the dot after it
+          const r = strip.getBoundingClientRect();
+          const scale = r.width / (strip.clientWidth || r.width);
+          const fi = ((e.clientX - (r.left + r.width / 2)) / scale + self.pos) / self.step;
+          self.animateTo(Math.round(fi / 2) * 2);
+          return;
+        }
+        if (item && strip.contains(item)) {
+          const idx = Number(item.dataset.i);
+          if (!self.canTap || self.canTap(idx)) self.animateTo(idx);   // e.g. half-hour dots aren't tappable
+        }
         else if (!self.free) self.animateTo(self.nearest());
         return;
       }
@@ -544,8 +555,9 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
   // ---------- Time: every half hour of the year (scrolls freely, no snapping) ----------
   const timeStrip = document.getElementById("timeStrip");
   const pillTrack = document.getElementById("pillTrack");
-  // White hours are 43.6 px apart (32 px block + 4.8 + 2 px dot + 4.8): 21.8 px per half hour
-  const time = new Carousel(timeStrip, 21.8, i => {
+  // White hours are 41.8 px apart (39.8 px hour frame spanning dot to dot + 2 px dot, as in the mockup):
+  // 20.9 px per half hour. A tap anywhere in an hour's frame (from dot to dot) selects that hour.
+  const time = new Carousel(timeStrip, 20.9, i => {
     if (!linking || time.following) return;
     const d = Math.floor(i / 48);   // crossing midnight changes the day,
     day.followTo(d);
@@ -557,6 +569,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     return '<span class="t-num">' + hour12(h) + '</span><span class="t-sub">' + ampm(h) + "</span>";
   });
   time.free = true;
+  time.hourTap = true;   // a tap anywhere between two half-hour dots selects the full hour between them
   time.onMove = updateTimePill;
 
   // Exact time of day as "7:44" + "AM"
@@ -574,7 +587,7 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     pillTrack.appendChild(el);
     pillEls.push(el);
   }
-  // Hours inside the pill are 52 px apart, the white ones 43.6 px (each strip in sync with the other)
+  // Hours inside the pill are 52 px apart, the white ones 41.8 px (each strip in sync with the other)
   const PILL_HOUR = 52;
   function updateTimePill(pos) {
     const steps = Math.max(0, Math.min(time.count - 1, pos / time.step));
@@ -994,12 +1007,12 @@ var geomagnetism=(()=>{var M=(t,h)=>()=>(h||t((h={exports:{}}).exports,h),h.expo
     // Half-hour dots; the line gets a gap around the ones on it (the line exists only above the horizon)
     let dots = "", holes = "";
     const bubbles = [];
-    // Yellow dots that would sit closer than 2 px (edge to edge) to a sunrise/sunset dot are dropped
-    const evQ = eventPts.map(ev => proj(ev.v)).filter(Boolean);
+    // A yellow half-hour dot within 10 minutes of sunrise or sunset is dropped (decided by time,
+    // not by screen distance, so it doesn't flicker as the phone moves)
     for (const hp of hourPts) {
       const q = proj(hp.v);
       if (!q) continue;
-      if (evQ.some(e => Math.hypot(e[0] - q[0], e[1] - q[1]) < 2.5 + 2.5 + 2)) continue;
+      if (eventPts.some(e => Math.abs(hp.min - e.min) < 10)) continue;
       const x = q[0].toFixed(1), y = q[1].toFixed(1);
       dots += '<circle cx="' + x + '" cy="' + y + '" r="2.5" fill="#FFBB00"/>';
       if (hp.up) holes += '<circle cx="' + x + '" cy="' + y + '" r="7"/>';
